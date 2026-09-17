@@ -875,7 +875,18 @@ namespace CodeWalker.WinForms
                 }
             }
 
-            var navbar = new SRTopNavbar(form, subtitle, onRefresh, openSettingsAction);
+            if (typeName == "WorldForm")
+            {
+                form.FormBorderStyle = FormBorderStyle.None;
+            }
+
+            bool isBorderless = (form.FormBorderStyle == FormBorderStyle.None);
+            var navbar = new SRTopNavbar(form, subtitle, onRefresh, openSettingsAction, isBorderless);
+            if (isBorderless)
+            {
+                new BorderlessFormResizer(form);
+            }
+
             form.Controls.Add(navbar);
             navbar.SendToBack(); // In WinForms docking, SendToBack ensures Top dock at Y=0 above existing controls
 
@@ -1217,15 +1228,40 @@ namespace CodeWalker.WinForms
         protected override void OnRenderButtonBackground(ToolStripItemRenderEventArgs e)
         {
             var btn = e.Item as ToolStripButton;
-            var rc = new Rectangle(1, 1, e.Item.Width - 2, e.Item.Height - 2);
+            var rc = new Rectangle(0, 0, e.Item.Width, e.Item.Height);
+
+            if (e.Item.Tag as string == "SR_NAVBAR_CLOSE")
+            {
+                if (e.Item.Selected || e.Item.Pressed)
+                {
+                    using (var brush = new SolidBrush(Color.FromArgb(232, 17, 35))) // Windows 11 close red
+                    {
+                        e.Graphics.FillRectangle(brush, rc);
+                    }
+                }
+                return;
+            }
+
+            if (e.Item.Tag as string == "SR_NAVBAR_WIN_BTN")
+            {
+                if (e.Item.Selected || e.Item.Pressed)
+                {
+                    using (var brush = new SolidBrush(SRThemeManager.CardHover))
+                    {
+                        e.Graphics.FillRectangle(brush, rc);
+                    }
+                }
+                return;
+            }
 
             if (btn != null && btn.Checked)
             {
                 using (var brush = new SolidBrush(Color.FromArgb(100, SRThemeManager.AccentColor)))
                 using (var pen = new Pen(SRThemeManager.AccentColor, 1))
                 {
-                    e.Graphics.FillRectangle(brush, rc);
-                    e.Graphics.DrawRectangle(pen, rc);
+                    var inner = new Rectangle(1, 1, e.Item.Width - 2, e.Item.Height - 2);
+                    e.Graphics.FillRectangle(brush, inner);
+                    e.Graphics.DrawRectangle(pen, inner);
                 }
             }
             else if (e.Item.Selected || e.Item.Pressed)
@@ -1233,8 +1269,9 @@ namespace CodeWalker.WinForms
                 using (var brush = new SolidBrush(SRThemeManager.CardHover))
                 using (var pen = new Pen(SRThemeManager.AccentColor, 1))
                 {
-                    e.Graphics.FillRectangle(brush, rc);
-                    e.Graphics.DrawRectangle(pen, rc);
+                    var inner = new Rectangle(1, 1, e.Item.Width - 2, e.Item.Height - 2);
+                    e.Graphics.FillRectangle(brush, inner);
+                    e.Graphics.DrawRectangle(pen, inner);
                 }
             }
         }
@@ -1258,13 +1295,21 @@ namespace CodeWalker.WinForms
 
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
         {
-            if (e.Item.Tag as string == "SR_NAVBAR_BRAND")
+            if (e.Item.Tag as string == "SR_NAVBAR_CLOSE" && (e.Item.Selected || e.Item.Pressed))
+            {
+                e.TextColor = Color.White;
+            }
+            else if (e.Item.Tag as string == "SR_NAVBAR_BRAND")
             {
                 e.TextColor = (e.Item.Selected || e.Item.Pressed) ? SRThemeManager.AccentHover : SRThemeManager.AccentColor;
             }
             else if (e.Item.Tag as string == "SR_NAVBAR_SUBTITLE")
             {
                 e.TextColor = SRThemeManager.SubText;
+            }
+            else if (e.Item.Tag as string == "SR_NAVBAR_WIN_BTN" || e.Item.Tag as string == "SR_NAVBAR_CLOSE")
+            {
+                e.TextColor = (e.Item.Selected || e.Item.Pressed) ? SRThemeManager.Text : SRThemeManager.SubText;
             }
             else
             {
