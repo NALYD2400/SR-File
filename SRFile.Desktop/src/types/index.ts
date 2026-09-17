@@ -204,12 +204,19 @@ export type ActiveView =
   | "audio"
   | "mods"
   | "gen9"
+  | "gxt2_studio"
   | "code_editor"
   | "hex_viewer"
   | "jenkins"
   | "crypto"
   | "project_editor"
   | "settings";
+
+export interface ParseGxt2Request {
+  filePath?: string;
+  base64Data?: string;
+  fileName?: string;
+}
 
 export interface RpfCacheItem {
   name: string;

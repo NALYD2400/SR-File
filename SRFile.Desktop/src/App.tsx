@@ -17,6 +17,8 @@ import { HexViewer } from "./components/editors/HexViewer";
 import { JenkinsTool } from "./components/crypto/JenkinsTool";
 import { CryptoTool } from "./components/crypto/CryptoTool";
 import { ProjectEditor } from "./components/project/ProjectEditor";
+import { Gxt2Studio } from "./components/editors/Gxt2Studio";
+import { ToastProvider } from "./components/common/Toast";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -129,6 +131,13 @@ function AppContent() {
 
           {activeView === "crypto" && <CryptoTool />}
 
+          {activeView === "gxt2_studio" && (
+            <Gxt2Studio
+              currentRpf={currentRpf}
+              onNavigateToExplorer={() => setActiveView("explorer")}
+            />
+          )}
+
           {activeView === "settings" && (
             <div className="flex-1 p-6 bg-[#0A0E16]">
               <div className="max-w-2xl">
@@ -173,7 +182,9 @@ function AppContent() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AppContent />
+      <ToastProvider>
+        <AppContent />
+      </ToastProvider>
     </QueryClientProvider>
   );
 }

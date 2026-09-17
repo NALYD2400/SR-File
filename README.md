@@ -193,6 +193,7 @@ Le backend expose une API REST locale sur le port configurable `5890` (ou param�
 | :--- | :--- | :--- |
 | `GET` | `/api/status` | Statut général, version, dossier GTA V et état des clés |
 | `GET` | `/api/system/metrics` | Diagnostic mémoire (RAM, GC, tas), processeur, threads et stats de cache |
+| `POST` | `/api/system/clear-cache` | Purge du cache des archives et libération forcée de la mémoire |
 | `POST` | `/api/config/gta-folder` | Configuration et chargement des clés depuis le dossier GTA V |
 | `POST` | `/api/rpf/open` | Chargement et indexation d'une archive `.rpf` |
 | `GET` | `/api/rpf/info` | Métadonnées d'une archive RPF ouverte |
@@ -210,11 +211,14 @@ Le backend expose une API REST locale sur le port configurable `5890` (ou param�
 | `GET` | `/api/rpf/texture/dds` | Extraction d'une texture au format natif DDS |
 | `GET` | `/api/rpf/audio/streams` | Liste des pistes audio d'une archive `.awc` |
 | `GET` | `/api/rpf/audio/wav` | Décodage et streaming d'une piste audio en WAV |
-| `GET` | `/api/text/gxt2` | Extraction et parsing d'une table de texte GXT2 |
+| `GET` | `/api/text/search` | Recherche GTA V universelle (par texte, hex 0x..., hash ou dictionnaire) |
+| `POST` | `/api/text/parse-gxt2` | Parsing et extraction d'un binaire GXT2 (upload ou base64) |
+| `GET` | `/api/text/gxt2` | Extraction et parsing d'une table de texte GXT2 depuis un RPF |
 | `GET` | `/api/text/gxt2/search` | Recherche dans un fichier GXT2 spécifique |
 | `GET` | `/api/text/search-rpf` | Recherche textuelle dans tous les GXT2 d'un RPF |
 | `POST` | `/api/text/gxt2/export-text` | Formatage d'entrées GXT2 en texte brut |
-| `POST` | `/api/text/gxt2/build` | Compilation de texte clair vers un binaire GXT2 |
+| `POST` | `/api/text/build-gxt2` | Compilation de texte clair ou JSON vers binaire `.gxt2` téléchargeable |
+| `POST` | `/api/text/gxt2/build` | Alias de compilation binaire GXT2 |
 | `GET` | `/api/mods` | Liste des mods installés |
 | `POST` | `/api/mods/toggle` | Activation / désactivation d'un mod |
 | `POST` | `/api/mods/inspect-oiv` | Analyse du manifeste d'une archive `.oiv` |

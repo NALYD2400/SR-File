@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { RpfInfo, RpfEntry, ActiveView } from "../../types";
 import { api } from "../../api/client";
-import { Search, FolderOpen, Sliders, Database, File, X, ArrowRight } from "lucide-react";
+import { Search, FolderOpen, Sliders, Database, File, X, ArrowRight, Type } from "lucide-react";
 import { formatBytes } from "../../lib/utils";
 
 interface CommandPaletteProps {
@@ -128,6 +128,20 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
             <div className="flex items-center gap-2.5">
               <Database className="w-4 h-4 text-[#FF7A29]" />
               <span>Accéder à l'explorateur RPF virtuel</span>
+            </div>
+            <ArrowRight className="w-3.5 h-3.5 text-[#64748B]" />
+          </div>
+
+          <div
+            onClick={() => {
+              onClose();
+              onSelectView("gxt2_studio");
+            }}
+            className="flex items-center justify-between p-2.5 rounded-xl hover:bg-[#172030] text-[#94A3B8] hover:text-white cursor-pointer transition-colors"
+          >
+            <div className="flex items-center gap-2.5">
+              <Type className="w-4 h-4 text-emerald-400" />
+              <span>Studio de Textes & Sous-Titres GXT2</span>
             </div>
             <ArrowRight className="w-3.5 h-3.5 text-[#64748B]" />
           </div>

@@ -55,6 +55,33 @@ namespace SRFile.Sidecar.Services
             );
         }
 
+        public Gxt2TableDto ParseGxt2FromRequest(ParseGxt2Request req)
+        {
+            if (req == null) return new Gxt2TableDto("empty.gxt2", 0, new List<Gxt2EntryDto>());
+
+            if (!string.IsNullOrWhiteSpace(req.FilePath) && File.Exists(req.FilePath))
+            {
+                byte[] fileBytes = File.ReadAllBytes(req.FilePath);
+                string name = !string.IsNullOrWhiteSpace(req.FileName) ? req.FileName : Path.GetFileName(req.FilePath);
+                return ParseGxt2(fileBytes, name);
+            }
+
+            if (!string.IsNullOrWhiteSpace(req.Base64Data))
+            {
+                string rawBase64 = req.Base64Data.Trim();
+                int commaIdx = rawBase64.IndexOf(',');
+                if (commaIdx >= 0 && rawBase64.Substring(0, commaIdx).Contains("base64"))
+                {
+                    rawBase64 = rawBase64.Substring(commaIdx + 1);
+                }
+                byte[] bytes = Convert.FromBase64String(rawBase64);
+                string name = !string.IsNullOrWhiteSpace(req.FileName) ? req.FileName : "uploaded.gxt2";
+                return ParseGxt2(bytes, name);
+            }
+
+            throw new ArgumentException("Aucun chemin de fichier valide ou donnée base64 fournie.");
+        }
+
         public Gxt2TableDto GetGxt2FromRpf(RpfService rpfService, string rpfPath, string entryPath)
         {
             byte[] data = rpfService.ExtractFile(rpfPath, entryPath);
@@ -144,6 +171,111 @@ namespace SRFile.Sidecar.Services
                 catch
                 {
                     // Continue scanning other GXT2 files
+                }
+            }
+
+            return results;
+        }
+
+        public List<Gxt2SearchResultDto> SearchGlobalStrings(string query, CryptoService? cryptoService = null, int maxResults = 100)
+        {
+            var results = new List<Gxt2SearchResultDto>();
+            if (string.IsNullOrWhiteSpace(query)) return results;
+
+            string q = query.Trim();
+            bool isHex = q.StartsWith("0x", StringComparison.OrdinalIgnoreCase);
+            uint queryHash = 0;
+            bool hasUintHash = false;
+
+            if (isHex && uint.TryParse(q.Substring(2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint parsedHex))
+            {
+                queryHash = parsedHex;
+                hasUintHash = true;
+            }
+            else if (uint.TryParse(q, out uint parsedUint))
+            {
+                queryHash = parsedUint;
+                hasUintHash = true;
+            }
+
+            var seenHashes = new HashSet<uint>();
+
+            // 1. Direct hash lookup if numeric/hex was parsed
+            if (hasUintHash)
+            {
+                string? directGlobal = GlobalText.TryGetString(queryHash);
+                string? directJenk = JenkIndex.TryGetString(queryHash);
+                string? cryptoLookup = cryptoService?.LookupHash(queryHash);
+
+                string foundText = directGlobal ?? directJenk ?? cryptoLookup ?? $"0x{queryHash:X8}";
+                string? resolvedKey = directJenk ?? cryptoLookup;
+
+                results.Add(new Gxt2SearchResultDto(
+                    RpfPath: "global_dictionary",
+                    EntryPath: "strings.txt",
+                    Hash: queryHash,
+                    HexHash: $"0x{queryHash:X8}",
+                    Text: foundText,
+                    ResolvedKey: resolvedKey
+                ));
+                seenHashes.Add(queryHash);
+            }
+
+            // 2. GlobalText.Index
+            try
+            {
+                var snapshot = GlobalText.Index.ToArray();
+                foreach (var kvp in snapshot)
+                {
+                    if (results.Count >= maxResults) break;
+                    if (seenHashes.Contains(kvp.Key)) continue;
+
+                    bool match = false;
+                    if (kvp.Value != null && kvp.Value.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        match = true;
+                    }
+                    else if ($"0x{kvp.Key:X8}".IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        match = true;
+                    }
+
+                    if (match)
+                    {
+                        seenHashes.Add(kvp.Key);
+                        string? resolvedKey = JenkIndex.TryGetString(kvp.Key);
+                        results.Add(new Gxt2SearchResultDto(
+                            RpfPath: "global_text",
+                            EntryPath: "GlobalText.Index",
+                            Hash: kvp.Key,
+                            HexHash: $"0x{kvp.Key:X8}",
+                            Text: kvp.Value ?? string.Empty,
+                            ResolvedKey: resolvedKey
+                        ));
+                    }
+                }
+            }
+            catch { }
+
+            // 3. Search CryptoService dictionary
+            if (cryptoService != null && results.Count < maxResults)
+            {
+                var dictMatches = cryptoService.SearchDictionary(q, maxResults - results.Count);
+                foreach (var item in dictMatches)
+                {
+                    if (results.Count >= maxResults) break;
+                    if (seenHashes.Contains(item.HashUint)) continue;
+
+                    seenHashes.Add(item.HashUint);
+                    string? globalVal = GlobalText.TryGetString(item.HashUint);
+                    results.Add(new Gxt2SearchResultDto(
+                        RpfPath: "dictionary",
+                        EntryPath: "strings.txt",
+                        Hash: item.HashUint,
+                        HexHash: item.HashHex,
+                        Text: !string.IsNullOrEmpty(globalVal) ? globalVal : item.Text,
+                        ResolvedKey: item.Text
+                    ));
                 }
             }
 

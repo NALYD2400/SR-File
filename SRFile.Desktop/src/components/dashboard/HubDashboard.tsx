@@ -1,6 +1,8 @@
 import React, { useState } from "react";
-import { AppStatus, RpfInfo, ActiveView } from "../../types";
+import { useQuery } from "@tanstack/react-query";
+import { AppStatus, RpfInfo, ActiveView, SystemMetrics } from "../../types";
 import { api } from "../../api/client";
+import { useToast } from "../common/Toast";
 import { 
   FolderOpen, 
   Database, 
@@ -17,9 +19,14 @@ import {
   ShieldCheck,
   Binary,
   Hash,
-  Map
+  Map,
+  Activity,
+  Gauge,
+  Trash2,
+  Clock,
+  Type
 } from "lucide-react";
-import { formatBytes } from "../../lib/utils";
+import { formatBytes, cn } from "../../lib/utils";
 
 interface HubDashboardProps {
   status?: AppStatus;
@@ -36,9 +43,41 @@ export const HubDashboard: React.FC<HubDashboardProps> = ({
   onNavigate,
   onOpenSettings,
 }) => {
+  const toast = useToast();
   const [loadingPath, setLoadingPath] = useState<string | null>(null);
   const [manualPath, setManualPath] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isClearingCache, setIsClearingCache] = useState(false);
+
+  // Poll system metrics every 3 seconds
+  const { data: metrics, refetch: refetchMetrics } = useQuery<SystemMetrics>({
+    queryKey: ["system-metrics"],
+    queryFn: () => api.getSystemMetrics(),
+    refetchInterval: 3000,
+  });
+
+  const handleClearCache = async () => {
+    setIsClearingCache(true);
+    try {
+      const res = await api.clearSystemCache();
+      await refetchMetrics();
+      toast.success("Cache système réinitialisé", `${res.evictedCount} archive(s) purgée(s) de la mémoire vive.`);
+    } catch (err: any) {
+      toast.error("Erreur de vidage du cache", err.message);
+    } finally {
+      setIsClearingCache(false);
+    }
+  };
+
+  const formatUptime = (seconds: number): string => {
+    if (!seconds || seconds <= 0) return "0s";
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  };
 
   const handleOpenNativeDialog = async () => {
     try {
@@ -229,12 +268,174 @@ export const HubDashboard: React.FC<HubDashboardProps> = ({
         </div>
       )}
 
+      {/* Live System Metrics & Cache Telemetry Widget */}
+      <div className="p-5 rounded-2xl border border-[#222D42] bg-[#121824]/95 shadow-xl space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#222D42]/70 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-[#FF7A29]/15 text-[#FF7A29] border border-[#FF7A29]/20">
+              <Activity className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-bold text-white tracking-wide">
+                  Télémétrie Sidecar & Cache RPF en Direct
+                </h2>
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                  </span>
+                  EN DIRECT
+                </span>
+              </div>
+              <p className="text-[11px] text-[#94A3B8] font-mono">
+                PID {metrics?.processId ?? "—"} • {metrics?.frameworkDescription ?? ".NET 8"} • Disponibilité : {formatUptime(metrics?.uptimeSeconds ?? status?.uptimeSeconds ?? 0)}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleClearCache}
+              disabled={isClearingCache}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#172030] hover:bg-rose-950/40 border border-[#222D42] hover:border-rose-700/50 text-xs font-semibold text-[#94A3B8] hover:text-rose-300 transition-all cursor-pointer disabled:opacity-50"
+              title="Purger le cache des archives et forcer la libération de la mémoire vive"
+            >
+              <Trash2 className={cn("w-3.5 h-3.5", isClearingCache && "animate-spin text-rose-400")} />
+              <span>{isClearingCache ? "Purge en cours..." : "Vider le cache système"}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Meters Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Meter 1: RAM Usage */}
+          <div className="p-3.5 rounded-xl bg-[#0A0E16]/80 border border-[#222D42]/60 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-[#64748B] font-mono flex items-center gap-1">
+                <Cpu className="w-3.5 h-3.5 text-[#FF7A29]" />
+                MÉMOIRE (RAM)
+              </span>
+              <span className="font-mono font-bold text-white">
+                {metrics ? `${metrics.processWorkingSetMB} MB` : "—"}
+              </span>
+            </div>
+            {/* Visual Bar */}
+            <div className="w-full h-2 rounded-full bg-[#1A2234] overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-[#FF7A29] to-rose-500 transition-all duration-500"
+                style={{
+                  width: `${Math.min(100, Math.max(5, ((metrics?.processWorkingSetMB ?? 25) / 300) * 100))}%`
+                }}
+              />
+            </div>
+            <div className="flex justify-between text-[10px] font-mono text-[#64748B]">
+              <span>GC: {metrics?.gcTotalMemoryMB ?? 0} MB</span>
+              <span>Gen0/1/2: {metrics ? `${metrics.gcGen0Collections}/${metrics.gcGen1Collections}/${metrics.gcGen2Collections}` : "—"}</span>
+            </div>
+          </div>
+
+          {/* Meter 2: Cache Hit Ratio */}
+          <div className="p-3.5 rounded-xl bg-[#0A0E16]/80 border border-[#222D42]/60 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-[#64748B] font-mono flex items-center gap-1">
+                <Gauge className="w-3.5 h-3.5 text-sky-400" />
+                RATIO CACHE HIT
+              </span>
+              <span className="font-mono font-bold text-sky-400">
+                {metrics ? (
+                  (metrics.cacheHits + metrics.cacheMisses > 0)
+                    ? `${((metrics.cacheHits / (metrics.cacheHits + metrics.cacheMisses)) * 100).toFixed(1)}%`
+                    : "100.0%"
+                ) : "100.0%"}
+              </span>
+            </div>
+            {/* Visual Bar */}
+            <div className="w-full h-2 rounded-full bg-[#1A2234] overflow-hidden">
+              <div
+                className="h-full rounded-full bg-sky-400 transition-all duration-500"
+                style={{
+                  width: metrics && (metrics.cacheHits + metrics.cacheMisses > 0)
+                    ? `${Math.min(100, (metrics.cacheHits / (metrics.cacheHits + metrics.cacheMisses)) * 100)}%`
+                    : "100%"
+                }}
+              />
+            </div>
+            <div className="flex justify-between text-[10px] font-mono text-[#64748B]">
+              <span className="text-emerald-400">Hits: {metrics?.cacheHits ?? 0}</span>
+              <span className="text-amber-400">Misses: {metrics?.cacheMisses ?? 0}</span>
+            </div>
+          </div>
+
+          {/* Meter 3: Active RPFs & Entries */}
+          <div className="p-3.5 rounded-xl bg-[#0A0E16]/80 border border-[#222D42]/60 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-[#64748B] font-mono flex items-center gap-1">
+                <Database className="w-3.5 h-3.5 text-purple-400" />
+                RPF EN MÉMOIRE
+              </span>
+              <span className="font-mono font-bold text-purple-400">
+                {metrics?.openArchivesCount ?? status?.loadedRpfsCount ?? 0} active(s)
+              </span>
+            </div>
+            <div className="text-[11px] font-mono text-white truncate">
+              {metrics?.totalIndexedEntries ? `${metrics.totalIndexedEntries.toLocaleString()} entrées indexées` : "Indexation O(1) prête"}
+            </div>
+            <div className="text-[10px] font-mono text-[#64748B] truncate">
+              {metrics?.openArchives && metrics.openArchives.length > 0
+                ? metrics.openArchives.map(a => a.name).join(", ")
+                : "Aucune archive verrouillée"}
+            </div>
+          </div>
+
+          {/* Meter 4: Sidecar Uptime & Thread count */}
+          <div className="p-3.5 rounded-xl bg-[#0A0E16]/80 border border-[#222D42]/60 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-[#64748B] font-mono flex items-center gap-1">
+                <Clock className="w-3.5 h-3.5 text-emerald-400" />
+                DISPONIBILITÉ
+              </span>
+              <span className="font-mono font-bold text-emerald-400">
+                {formatUptime(metrics?.uptimeSeconds ?? status?.uptimeSeconds ?? 0)}
+              </span>
+            </div>
+            <div className="text-[11px] font-mono text-white">
+              {metrics?.threadCount ?? 4} threads actifs • {metrics?.handleCount ?? 0} handles
+            </div>
+            <div className="text-[10px] font-mono text-[#64748B]">
+              {metrics?.osPlatform ? metrics.osPlatform.slice(0, 24) : "Windows x64"}
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Quick Action Grid */}
       <div>
         <h2 className="text-xs font-mono uppercase tracking-wider text-[#64748B] mb-3 font-semibold">
           Modules & Outils SR File Suite
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {/* Card: GXT2 Studio */}
+          <div
+            onClick={() => onNavigate("gxt2_studio")}
+            className="group p-5 rounded-xl bg-[#121824] hover:bg-[#172030] border border-[#222D42] hover:border-[#FF7A29]/40 transition-all cursor-pointer shadow-sm space-y-3"
+          >
+            <div className="flex items-center justify-between">
+              <div className="p-2.5 rounded-lg bg-emerald-500/10 text-emerald-400 group-hover:scale-110 transition-transform">
+                <Type className="w-5 h-5" />
+              </div>
+              <ArrowRight className="w-4 h-4 text-[#64748B] group-hover:text-[#FF7A29] transition-colors" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-white group-hover:text-[#FF7A29] transition-colors">
+                Studio de Textes GXT2
+              </h3>
+              <p className="text-xs text-[#94A3B8] mt-1 leading-relaxed">
+                Recherche et édition en direct des sous-titres et chaînes GTA V avec aperçu instantané des balises de couleurs.
+              </p>
+            </div>
+          </div>
+
           {/* Card 1: RPF Explorer */}
           <div
             onClick={() => onNavigate("explorer")}

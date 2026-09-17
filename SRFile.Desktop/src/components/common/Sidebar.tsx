@@ -13,7 +13,8 @@ import {
   Binary,
   Hash,
   KeyRound,
-  Cpu
+  Cpu,
+  Type
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 
@@ -47,6 +48,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeView, onSelectView, rpfL
     {
       title: "Modding GTA V",
       items: [
+        { id: "gxt2_studio", label: "Studio Textes GXT2", icon: Type, badge: "Nouveau" },
         { id: "mods", label: "Mod Manager", icon: ShieldCheck },
         { id: "gen9", label: "Convertisseur Gen9", icon: Layers },
         { id: "project_editor", label: "Éditeur de Projet", icon: Map },

@@ -619,9 +619,83 @@ app.MapGet("/api/system/metrics", (SystemService systemService) =>
     return Results.Ok(systemService.GetMetrics());
 });
 
+app.MapPost("/api/system/clear-cache", (RpfService service) =>
+{
+    int cleared = service.ClearCache();
+    return Results.Ok(new { success = true, evictedCount = cleared });
+});
+
 // ==========================================
 // 7. GXT2 & GTA V Text Table Endpoints
 // ==========================================
+app.MapGet("/api/text/search", (string? q, string? rpfPath, string? entryPath, int? limit, RpfService rpfService, TextService textService, CryptoService cryptoService) =>
+{
+    try
+    {
+        string query = q ?? "";
+        if (!string.IsNullOrEmpty(rpfPath) && !string.IsNullOrEmpty(entryPath))
+        {
+            var table = textService.GetGxt2FromRpf(rpfService, rpfPath, entryPath);
+            var matches = textService.SearchGxt2(table, query, limit ?? 100);
+            var mapped = matches.Select(m => new Gxt2SearchResultDto(
+                RpfPath: rpfPath,
+                EntryPath: entryPath,
+                Hash: m.Hash,
+                HexHash: m.HexHash,
+                Text: m.Text,
+                ResolvedKey: m.ResolvedKey
+            )).ToList();
+            return Results.Ok(mapped);
+        }
+        else if (!string.IsNullOrEmpty(rpfPath))
+        {
+            var results = textService.SearchRpfGxt2(rpfService, rpfPath, query, limit ?? 250);
+            return Results.Ok(results);
+        }
+        else
+        {
+            var results = textService.SearchGlobalStrings(query, cryptoService, limit ?? 100);
+            return Results.Ok(results);
+        }
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapPost("/api/text/parse-gxt2", async (HttpRequest request, TextService textService) =>
+{
+    try
+    {
+        if (request.HasFormContentType)
+        {
+            var form = await request.ReadFormAsync();
+            var file = form.Files.FirstOrDefault();
+            if (file != null)
+            {
+                using var ms = new MemoryStream();
+                await file.CopyToAsync(ms);
+                var table = textService.ParseGxt2(ms.ToArray(), file.FileName);
+                return Results.Ok(table);
+            }
+        }
+
+        var req = await request.ReadFromJsonAsync<ParseGxt2Request>();
+        if (req != null)
+        {
+            var table = textService.ParseGxt2FromRequest(req);
+            return Results.Ok(table);
+        }
+
+        return Results.BadRequest(new { error = "Données GXT2 non fournies." });
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
 app.MapGet("/api/text/gxt2", (string rpfPath, string entryPath, RpfService rpfService, TextService textService) =>
 {
     try
@@ -668,6 +742,20 @@ app.MapPost("/api/text/gxt2/export-text", (Gxt2ExportRequest req, TextService te
     {
         string text = textService.ExportToText(req.Entries);
         return Results.Ok(new { text });
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapPost("/api/text/build-gxt2", (Gxt2BuildRequest req, TextService textService) =>
+{
+    try
+    {
+        byte[] gxt2Bytes = textService.BuildGxt2(req.TextContent, req.EntryName ?? "text.gxt2");
+        string dlName = req.EntryName ?? "text.gxt2";
+        return Results.File(gxt2Bytes, "application/octet-stream", fileDownloadName: dlName);
     }
     catch (Exception ex)
     {

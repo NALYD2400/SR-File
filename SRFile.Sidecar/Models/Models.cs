@@ -389,5 +389,11 @@ namespace SRFile.Sidecar.Models
         string TextContent,
         string? EntryName
     );
+
+    public record ParseGxt2Request(
+        string? FilePath,
+        string? Base64Data,
+        string? FileName
+    );
 }
 

@@ -24,6 +24,7 @@ import {
   Gxt2Entry,
   Gxt2Table,
   Gxt2SearchResult,
+  ParseGxt2Request,
 } from "../types";
 
 let cachedBaseUrl = "http://127.0.0.1:5890";
@@ -370,6 +371,10 @@ export const api = {
     return fetchSidecar<SystemMetrics>("/api/system/metrics");
   },
 
+  async clearSystemCache(): Promise<{ success: boolean; evictedCount: number }> {
+    return fetchSidecar("/api/system/clear-cache", { method: "POST" });
+  },
+
   // 8. Text & GXT2 API
   async getGxt2(rpfPath: string, entryPath: string): Promise<Gxt2Table> {
     const params = new URLSearchParams({ rpfPath, entryPath });
@@ -381,9 +386,23 @@ export const api = {
     return fetchSidecar<Gxt2Entry[]>(`/api/text/gxt2/search?${params.toString()}`);
   },
 
+  async searchText(q: string, limit = 100, rpfPath?: string, entryPath?: string): Promise<Gxt2SearchResult[]> {
+    const params = new URLSearchParams({ q, limit: limit.toString() });
+    if (rpfPath) params.set("rpfPath", rpfPath);
+    if (entryPath) params.set("entryPath", entryPath);
+    return fetchSidecar<Gxt2SearchResult[]>(`/api/text/search?${params.toString()}`);
+  },
+
   async searchRpfGxt2(rpfPath: string, q: string, limit = 250): Promise<Gxt2SearchResult[]> {
     const params = new URLSearchParams({ rpfPath, q, limit: limit.toString() });
     return fetchSidecar<Gxt2SearchResult[]>(`/api/text/search-rpf?${params.toString()}`);
+  },
+
+  async parseGxt2(req: ParseGxt2Request): Promise<Gxt2Table> {
+    return fetchSidecar<Gxt2Table>("/api/text/parse-gxt2", {
+      method: "POST",
+      body: JSON.stringify(req),
+    });
   },
 
   async exportGxt2Text(entries: Gxt2Entry[], fileName?: string): Promise<{ text: string }> {
@@ -395,13 +414,17 @@ export const api = {
 
   async buildGxt2(textContent: string, entryName = "text.gxt2"): Promise<Blob> {
     const base = await getBaseUrl();
-    const res = await fetch(`${base}/api/text/gxt2/build`, {
+    const res = await fetch(`${base}/api/text/build-gxt2`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ textContent, entryName }),
     });
     if (!res.ok) throw new Error("Failed to build GXT2 binary");
     return res.blob();
+  },
+
+  async buildGxt2Binary(textContent: string, entryName = "text.gxt2"): Promise<Blob> {
+    return this.buildGxt2(textContent, entryName);
   },
 
   // Native Tauri Dialogs
@@ -427,3 +450,14 @@ export const api = {
     }
   },
 };
+
+export function triggerFileDownload(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

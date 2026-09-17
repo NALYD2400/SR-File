@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef } from "react";
 import { RpfInfo, RpfEntry, TextureItem, AudioStream } from "../../types";
-import { api } from "../../api/client";
+import { api, getBaseUrl, triggerFileDownload } from "../../api/client";
+import { useToast } from "../common/Toast";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Folder,
@@ -21,6 +22,10 @@ import {
   Check,
   HardDrive,
   RefreshCw,
+  Archive,
+  CheckSquare,
+  Square,
+  FolderDown
 } from "lucide-react";
 import { formatBytes, cn } from "../../lib/utils";
 
@@ -30,10 +35,16 @@ interface RpfExplorerProps {
 }
 
 export const RpfExplorer: React.FC<RpfExplorerProps> = ({ currentRpf, onOpenAnotherRpf }) => {
+  const toast = useToast();
   const [currentPath, setCurrentPath] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedEntry, setSelectedEntry] = useState<RpfEntry | null>(null);
   
+  // Selection & Batch Export States
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [isExtractingZip, setIsExtractingZip] = useState<boolean>(false);
+  const [isExtractingBatch, setIsExtractingBatch] = useState<boolean>(false);
+
   // Data queries
   const [entries, setEntries] = useState<RpfEntry[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -65,6 +76,7 @@ export const RpfExplorer: React.FC<RpfExplorerProps> = ({ currentRpf, onOpenAnot
       setEntries(data);
       setCurrentPath(path);
       setSelectedEntry(null);
+      setSelectedPaths(new Set());
       setTextContent(null);
       setTextures([]);
       setAudioStreams([]);
@@ -72,6 +84,94 @@ export const RpfExplorer: React.FC<RpfExplorerProps> = ({ currentRpf, onOpenAnot
       setError(err.message || "Impossible de charger le dossier");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const toggleSelectPath = (e: React.MouseEvent, path: string) => {
+    e.stopPropagation();
+    setSelectedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedPaths.size === filteredEntries.length && filteredEntries.length > 0) {
+      setSelectedPaths(new Set());
+    } else {
+      setSelectedPaths(new Set(filteredEntries.map((e) => e.path)));
+    }
+  };
+
+  const handleExtractFolderZip = async (targetFolder = currentPath) => {
+    if (!currentRpf) return;
+    setIsExtractingZip(true);
+    try {
+      const folderName = targetFolder
+        ? targetFolder.split(/[\\/]/).pop() || "dossier"
+        : currentRpf.name.replace(/\.rpf$/i, "");
+      const base = await getBaseUrl();
+      const res = await fetch(`${base}/api/rpf/extract-folder`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rpfPath: currentRpf.filePath,
+          folderPath: targetFolder,
+          asZip: true,
+          recursive: true,
+        }),
+      });
+      if (!res.ok) throw new Error("Échec de l'extraction ZIP du dossier");
+      const blob = await res.blob();
+      triggerFileDownload(blob, `${folderName}.zip`);
+      toast.success("Extraction ZIP réussie", `Le dossier "${folderName}" a été exporté en archive ZIP.`);
+    } catch (err: any) {
+      toast.error("Erreur d'extraction", err.message);
+    } finally {
+      setIsExtractingZip(false);
+    }
+  };
+
+  const handleExtractBatchZip = async () => {
+    if (!currentRpf || selectedPaths.size === 0) return;
+    setIsExtractingBatch(true);
+    try {
+      const base = await getBaseUrl();
+      const res = await fetch(`${base}/api/rpf/extract-batch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rpfPath: currentRpf.filePath,
+          entryPaths: Array.from(selectedPaths),
+          asZip: true,
+        }),
+      });
+      if (!res.ok) throw new Error("Échec du téléchargement groupé ZIP");
+      const blob = await res.blob();
+      triggerFileDownload(blob, "export_selection.zip");
+      toast.success("Téléchargement terminé", `${selectedPaths.size} élément(s) exporté(s) en ZIP.`);
+    } catch (err: any) {
+      toast.error("Erreur de téléchargement", err.message);
+    } finally {
+      setIsExtractingBatch(false);
+    }
+  };
+
+  const handleExtractFolderToDisk = async (targetFolder = currentPath) => {
+    if (!currentRpf) return;
+    try {
+      const dest = await api.selectFolderNative("Choisir le dossier de destination");
+      if (!dest) return;
+      const res = await api.extractFolder(currentRpf.filePath, targetFolder, dest, false, true);
+      if (res.success) {
+        toast.success("Extraction disque réussie", `${res.extractedCount} fichier(s) extraits dans "${dest}".`);
+      } else {
+        toast.error("Extraction partielle", `${res.errorCount} erreur(s) survenue(s).`);
+      }
+    } catch (err: any) {
+      toast.error("Erreur d'extraction", err.message);
     }
   };
 
@@ -202,6 +302,7 @@ export const RpfExplorer: React.FC<RpfExplorerProps> = ({ currentRpf, onOpenAnot
     if (textContent) {
       navigator.clipboard.writeText(textContent);
       setCopiedText(true);
+      toast.success("Copié !", "Contenu textuel copié dans le presse-papier.");
       setTimeout(() => setCopiedText(false), 2000);
     }
   };
@@ -293,13 +394,49 @@ export const RpfExplorer: React.FC<RpfExplorerProps> = ({ currentRpf, onOpenAnot
             )}
           </div>
 
-          <button
-            onClick={() => loadDirectory(currentPath)}
-            className="p-1.5 rounded-lg bg-[#0A0E16] hover:bg-[#172030] border border-[#222D42] text-[#94A3B8] hover:text-white transition-colors cursor-pointer"
-            title="Actualiser"
-          >
-            <RefreshCw className={cn("w-3.5 h-3.5", isLoading && "animate-spin text-[#FF7A29]")} />
-          </button>
+          {/* Quick Action Export Controls */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Folder Extract ZIP Button */}
+            <button
+              onClick={() => handleExtractFolderZip()}
+              disabled={isExtractingZip}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#172030] hover:bg-[#1E283D] border border-[#222D42] hover:border-[#FF7A29]/50 text-xs font-semibold text-[#94A3B8] hover:text-white transition-all cursor-pointer disabled:opacity-50"
+              title="Exporter l'intégralité du dossier courant dans un fichier ZIP"
+            >
+              <Archive className={cn("w-3.5 h-3.5 text-[#FF7A29]", isExtractingZip && "animate-spin")} />
+              <span className="hidden sm:inline">{isExtractingZip ? "Compression..." : "Extraire le dossier (ZIP)"}</span>
+            </button>
+
+            {/* Batch Selection ZIP Button */}
+            {selectedPaths.size > 0 && (
+              <>
+                <button
+                  onClick={handleExtractBatchZip}
+                  disabled={isExtractingBatch}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#FF7A29] hover:bg-[#FF8F4D] text-white text-xs font-bold shadow-[0_0_15px_rgba(255,122,41,0.3)] transition-all cursor-pointer disabled:opacity-50 animate-in fade-in"
+                >
+                  <Download className={cn("w-3.5 h-3.5", isExtractingBatch && "animate-spin")} />
+                  <span>Télécharger la sélection ({selectedPaths.size})</span>
+                </button>
+
+                <button
+                  onClick={() => setSelectedPaths(new Set())}
+                  className="p-1.5 rounded-lg bg-[#172030] hover:bg-[#1E283D] border border-[#222D42] text-[#94A3B8] hover:text-white transition-colors cursor-pointer"
+                  title="Désélectionner tout"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </>
+            )}
+
+            <button
+              onClick={() => loadDirectory(currentPath)}
+              className="p-1.5 rounded-lg bg-[#0A0E16] hover:bg-[#172030] border border-[#222D42] text-[#94A3B8] hover:text-white transition-colors cursor-pointer"
+              title="Actualiser"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5", isLoading && "animate-spin text-[#FF7A29]")} />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -314,8 +451,21 @@ export const RpfExplorer: React.FC<RpfExplorerProps> = ({ currentRpf, onOpenAnot
         {/* Virtualized Table Container */}
         <div className="flex-1 flex flex-col overflow-hidden bg-[#0A0E16]">
           {/* Table Header */}
-          <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-[#222D42] bg-[#121824]/50 text-[11px] font-mono uppercase text-[#64748B] font-semibold select-none shrink-0">
-            <div className="col-span-6 flex items-center gap-2">Nom</div>
+          <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-[#222D42] bg-[#121824]/50 text-[11px] font-mono uppercase text-[#64748B] font-semibold select-none shrink-0 items-center">
+            <div className="col-span-6 flex items-center gap-2.5">
+              <button
+                onClick={toggleSelectAll}
+                className="text-[#64748B] hover:text-[#FF7A29] transition-colors cursor-pointer"
+                title={selectedPaths.size === filteredEntries.length && filteredEntries.length > 0 ? "Désélectionner tout" : "Tout sélectionner"}
+              >
+                {selectedPaths.size > 0 && selectedPaths.size === filteredEntries.length ? (
+                  <CheckSquare className="w-3.5 h-3.5 text-[#FF7A29]" />
+                ) : (
+                  <Square className="w-3.5 h-3.5" />
+                )}
+              </button>
+              <span>Nom</span>
+            </div>
             <div className="col-span-2">Format / Type</div>
             <div className="col-span-2 text-right">Taille</div>
             <div className="col-span-2 text-right">Compressé</div>
@@ -344,6 +494,7 @@ export const RpfExplorer: React.FC<RpfExplorerProps> = ({ currentRpf, onOpenAnot
                 {rowVirtualizer.getVirtualItems().map((virtualRow) => {
                   const entry = filteredEntries[virtualRow.index];
                   const isSelected = selectedEntry?.path === entry.path;
+                  const isChecked = selectedPaths.has(entry.path);
                   return (
                     <div
                       key={virtualRow.index}
@@ -358,14 +509,26 @@ export const RpfExplorer: React.FC<RpfExplorerProps> = ({ currentRpf, onOpenAnot
                         transform: `translateY(${virtualRow.start}px)`,
                       }}
                       className={cn(
-                        "grid grid-cols-12 gap-2 px-4 items-center text-xs font-mono select-none cursor-pointer border-b border-[#222D42]/30 transition-colors",
+                        "grid grid-cols-12 gap-2 px-4 items-center text-xs font-mono select-none cursor-pointer border-b border-[#222D42]/30 transition-colors group",
                         isSelected
                           ? "bg-[#FF7A29]/15 text-white border-[#FF7A29]/40"
+                          : isChecked
+                          ? "bg-[#FF7A29]/5 text-white"
                           : "hover:bg-[#121824] text-[#94A3B8] hover:text-white"
                       )}
                     >
-                      {/* Name + Icon */}
+                      {/* Checkbox + Name + Icon */}
                       <div className="col-span-6 flex items-center gap-2.5 truncate">
+                        <button
+                          onClick={(e) => toggleSelectPath(e, entry.path)}
+                          className="text-[#64748B] hover:text-[#FF7A29] transition-colors cursor-pointer shrink-0"
+                        >
+                          {isChecked ? (
+                            <CheckSquare className="w-3.5 h-3.5 text-[#FF7A29]" />
+                          ) : (
+                            <Square className="w-3.5 h-3.5 opacity-50 group-hover:opacity-100" />
+                          )}
+                        </button>
                         {getFileIcon(entry)}
                         <span className="truncate font-medium">{entry.name}</span>
                       </div>
@@ -707,16 +870,62 @@ export const RpfExplorer: React.FC<RpfExplorerProps> = ({ currentRpf, onOpenAnot
                     </div>
                   )}
 
-                  {/* Generic File Download */}
+                  {/* Folder Export Controls */}
+                  {selectedEntry.isDirectory && (
+                    <div className="space-y-2 pt-2">
+                      <button
+                        onClick={() => handleExtractFolderZip(selectedEntry.path)}
+                        disabled={isExtractingZip}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-[#FF7A29] hover:bg-[#FF8F4D] text-white font-bold text-xs transition-colors cursor-pointer shadow-lg disabled:opacity-50"
+                      >
+                        <Archive className="w-4 h-4" />
+                        <span>{isExtractingZip ? "Compression en cours..." : "Extraire ce sous-dossier (ZIP)"}</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleExtractFolderToDisk(selectedEntry.path)}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-[#172030] hover:bg-[#1E283D] border border-[#222D42] text-white font-semibold text-xs transition-colors cursor-pointer"
+                      >
+                        <FolderDown className="w-4 h-4 text-[#FF7A29]" />
+                        <span>Extraire sur le disque...</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Generic File Download & Batch Selection Toggle */}
                   {!selectedEntry.isDirectory && (
-                    <a
-                      href={api.getRawFileUrl(currentRpf.filePath, selectedEntry.path)}
-                      download={selectedEntry.name}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-[#FF7A29] hover:bg-[#FF8F4D] text-white font-bold text-xs transition-colors cursor-pointer shadow-lg"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span>Exporter ce fichier</span>
-                    </a>
+                    <div className="space-y-2 pt-2">
+                      <a
+                        href={api.getRawFileUrl(currentRpf.filePath, selectedEntry.path)}
+                        download={selectedEntry.name}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-[#FF7A29] hover:bg-[#FF8F4D] text-white font-bold text-xs transition-colors cursor-pointer shadow-lg"
+                      >
+                        <Download className="w-4 h-4" />
+                        <span>Exporter ce fichier</span>
+                      </a>
+
+                      <button
+                        onClick={(e) => toggleSelectPath(e, selectedEntry.path)}
+                        className={cn(
+                          "w-full flex items-center justify-center gap-2 py-2 px-4 rounded-xl border text-xs font-semibold transition-colors cursor-pointer",
+                          selectedPaths.has(selectedEntry.path)
+                            ? "bg-rose-950/40 border-rose-800/50 text-rose-300 hover:bg-rose-900/60"
+                            : "bg-[#172030] border-[#222D42] text-[#94A3B8] hover:text-white"
+                        )}
+                      >
+                        {selectedPaths.has(selectedEntry.path) ? (
+                          <>
+                            <X className="w-3.5 h-3.5" />
+                            <span>Retirer de la sélection</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckSquare className="w-3.5 h-3.5 text-[#FF7A29]" />
+                            <span>Ajouter à la sélection</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
                   )}
                 </div>
               ) : (

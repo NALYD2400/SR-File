@@ -1253,6 +1253,92 @@ namespace SRFile.Sidecar.Tests
                 }
             }
         }
+
+        [Fact]
+        public void ParseGxt2FromRequest_WithBase64AndFilePath_ParsesAccurately()
+        {
+            var service = new TextService();
+            string source = "0x12345678 = Base64 GXT2 Entry\n0x87654321 = Second Entry";
+            byte[] binary = service.BuildGxt2(source, "unit_test.gxt2");
+            string base64 = Convert.ToBase64String(binary);
+
+            // 1. Test Base64 parsing (with data URI prefix handling)
+            var reqBase64 = new Models.ParseGxt2Request(null, $"data:application/octet-stream;base64,{base64}", "custom.gxt2");
+            var tableFromB64 = service.ParseGxt2FromRequest(reqBase64);
+            Assert.NotNull(tableFromB64);
+            Assert.Equal("custom.gxt2", tableFromB64.FileName);
+            Assert.Equal(2u, tableFromB64.EntryCount);
+            Assert.Contains(tableFromB64.Entries, e => e.HexHash == "0x12345678" && e.Text == "Base64 GXT2 Entry");
+
+            // 2. Test FilePath parsing
+            string tempFile = Path.Combine(Path.GetTempPath(), "test_" + Guid.NewGuid().ToString("N") + ".gxt2");
+            try
+            {
+                File.WriteAllBytes(tempFile, binary);
+                var reqFile = new Models.ParseGxt2Request(tempFile, null, null);
+                var tableFromFile = service.ParseGxt2FromRequest(reqFile);
+                Assert.NotNull(tableFromFile);
+                Assert.Equal(Path.GetFileName(tempFile), tableFromFile.FileName);
+                Assert.Equal(2u, tableFromFile.EntryCount);
+            }
+            finally
+            {
+                if (File.Exists(tempFile)) File.Delete(tempFile);
+            }
+
+            // 3. Test Invalid input
+            Assert.Throws<ArgumentException>(() => service.ParseGxt2FromRequest(new Models.ParseGxt2Request(null, null, null)));
+        }
+
+        [Fact]
+        public void SearchGlobalStrings_WithCryptoDictionary_ReturnsMatchesAndResolvesKeys()
+        {
+            var textService = new TextService();
+            var cryptoService = new CryptoService();
+            cryptoService.AddDictionaryEntry("special_carbine_mk2");
+
+            uint carbineHash = CodeWalker.GameFiles.JenkHash.GenHash("special_carbine_mk2");
+
+            // Direct hex search
+            var hexResults = textService.SearchGlobalStrings($"0x{carbineHash:X8}", cryptoService, 10);
+            Assert.NotEmpty(hexResults);
+            Assert.Contains(hexResults, r => r.Hash == carbineHash);
+
+            // Substring search
+            var subResults = textService.SearchGlobalStrings("special_carbine", cryptoService, 10);
+            Assert.NotEmpty(subResults);
+            Assert.Contains(subResults, r => r.Text.Contains("special_carbine_mk2", StringComparison.OrdinalIgnoreCase) ||
+                                             (r.ResolvedKey != null && r.ResolvedKey.Contains("special_carbine_mk2", StringComparison.OrdinalIgnoreCase)));
+        }
+
+        [Fact]
+        public void SystemService_CacheClear_EvictsLoadedArchives()
+        {
+            string tempDir = Path.Combine(Path.GetTempPath(), "SRFile_SysClear_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            string rpfPath = Path.Combine(tempDir, "sys_clear.rpf");
+
+            try
+            {
+                var rpf = CodeWalker.GameFiles.RpfFile.CreateNew(tempDir, "sys_clear.rpf", CodeWalker.GameFiles.RpfEncryption.OPEN);
+                CodeWalker.GameFiles.RpfFile.CreateFile(rpf.Root, "test.txt", Encoding.UTF8.GetBytes("clear me"), true);
+
+                var rpfService = new RpfService();
+                rpfService.OpenRpf(rpfPath);
+                Assert.Equal(1, rpfService.GetCacheStats().LoadedRpfsCount);
+
+                int cleared = rpfService.ClearCache();
+                Assert.Equal(1, cleared);
+                Assert.Equal(0, rpfService.GetCacheStats().LoadedRpfsCount);
+            }
+            finally
+            {
+                if (Directory.Exists(tempDir))
+                {
+                    try { Directory.Delete(tempDir, true); } catch { }
+                }
+            }
+        }
     }
 }
 
