@@ -1,4 +1,4 @@
-﻿using CodeWalker.GameFiles;
+using CodeWalker.GameFiles;
 using SharpDX;
 using System;
 using System.Collections.Generic;
@@ -64,6 +64,8 @@ namespace CodeWalker.World
             Center = new Vector3(0.0f, 0.0f, -1.2f); //base collision point is 1.7m below center... for camera offset
 
             Mass = 80.0f;
+            EnableCollisions = true;
+            Enabled = true;
 
             ForwardVec = Vector3.UnitY;
             CameraEntity.Orientation = CameraOrientation;
@@ -74,10 +76,10 @@ namespace CodeWalker.World
         {
 
             //float rotspd = 0.5f;
-            float movspd = 10.0f;
-            float velspd = 10.0f;
-            float jmpvel = 3.0f;
-            float boostmult = 10.0f;
+            float movspd = 3.5f;
+            float velspd = 12.0f;
+            float jmpvel = 4.8f;
+            float boostmult = 2.1f;
             if (ControlBoost) movspd *= boostmult;
 
             Quaternion rot = Quaternion.Identity;// .RotationAxis(Vector3.UnitZ, -ControlMovement.X * rotspd * elapsed);
@@ -108,7 +110,7 @@ namespace CodeWalker.World
                     Vector3 raydir = new Vector3(0.0f, 0.0f, -1.0f);
                     Vector3 rayoff = new Vector3(0.0f, 0.0f, 0.0f);
                     Ray ray = new Ray(targetpos + Center + rayoff, raydir);
-                    var rayhit = Space.RayIntersect(ray, 1.0f);
+                    var rayhit = Space.RayIntersect(ray, 2.5f, Space.CollisionLayers);
                     if (rayhit.Hit)
                     {
                         if (rayhit.HitDist > 0)
@@ -137,9 +139,10 @@ namespace CodeWalker.World
 
 
                 bool wasOnGround = OnGround;
-                OnGround = (Vector3.Dot(coll.SphereHit.Normal, Vector3.UnitZ) > 0.8f);
+                OnGround = (Vector3.Dot(coll.SphereHit.Normal, Vector3.UnitZ) > 0.6f);
                 if (OnGround)
                 {
+                    Velocity = new Vector3(Velocity.X, Velocity.Y, Math.Max(0.0f, Velocity.Z));
                 }
 
 
@@ -164,19 +167,27 @@ namespace CodeWalker.World
 
                 var raydir = new Vector3(0.0f, 0.0f, -1.0f);
                 var ray = new Ray(Position, raydir);
-                var rayhit = Space.RayIntersect(ray, float.MaxValue);
-                if (!rayhit.Hit && rayhit.TestComplete)
+                var rayhit = Space.RayIntersect(ray, 3.0f, Space.CollisionLayers);
+                if (rayhit.Hit)
+                {
+                    if (rayhit.HitDist <= 1.8f)
+                    {
+                        Position = rayhit.Position - Center + new Vector3(0, 0, Radius);
+                        Velocity = new Vector3(Velocity.X, Velocity.Y, 0);
+                        OnGround = true;
+                    }
+                }
+                else if (rayhit.TestComplete)
                 {
                     //must be under the map? try to find the ground...
                     ray.Position = Position + new Vector3(0.0f, 0.0f, 1000.0f);
-                    rayhit = Space.RayIntersect(ray, float.MaxValue);
+                    rayhit = Space.RayIntersect(ray, float.MaxValue, Space.CollisionLayers);
                     if (rayhit.Hit)
                     {
                         Position = rayhit.Position + new Vector3(0.0f, 0.0f, Radius) - Center;
+                        Velocity = new Vector3(Velocity.X, Velocity.Y, 0);
                         OnGround = true;
                     }
-                    else
-                    { }//didn't find the ground, what to do now?
                 }
             }
 

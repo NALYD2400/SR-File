@@ -99,6 +99,8 @@ namespace CodeWalker
         float playerPedHeading = 0.0f;
         float vehicleSpeed = 0.0f;
         float vehicleHeading = 0.0f;
+        float vehicleVerticalVelocity = 0.0f;
+        float pedVerticalVelocity = 0.0f;
         Vector3 vehicleGroundOffset = Vector3.Zero;
         volatile bool isSpawningPed = false;
         volatile bool isSpawningVehicle = false;
@@ -2415,9 +2417,24 @@ namespace CodeWalker
                 }
                 else
                 {
-                    pedEntity.Position = camEntity.Position;
+                    Vector3 testPos = camEntity.Position;
+                    Ray groundRay = new Ray(testPos + new Vector3(0, 0, 30.0f), -Vector3.UnitZ);
+                    var ghit = space.RayIntersect(groundRay, 100.0f, collisionmeshlayers);
+                    float gZ = ghit.Hit ? ghit.Position.Z : (testPos.Z - 1.7f);
+
+                    pedEntity.Position = new Vector3(testPos.X, testPos.Y, gZ + 1.7f);
                     pedEntity.Velocity = Vector3.Zero;
+                    pedEntity.EnableCollisions = true;
                     pedEntity.Enabled = true;
+                    pedEntity.OnGround = true;
+                    pedVerticalVelocity = 0.0f;
+
+                    if (playerPed != null)
+                    {
+                        playerPed.Position = new Vector3(testPos.X, testPos.Y, gZ);
+                        playerPed.Rotation = Quaternion.RotationAxis(Vector3.UnitZ, playerPedHeading);
+                        playerPed.UpdateEntity();
+                    }
 
                     camera.SetFollowEntity(pedEntity.CameraEntity);
                     camera.TargetDistance = 3.5f; // 3rd person
@@ -2455,9 +2472,22 @@ namespace CodeWalker
                 if (activeVehicle != null)
                 {
                     Vector3 rgt = new Vector3((float)Math.Cos(vehicleHeading), (float)Math.Sin(vehicleHeading), 0.0f);
-                    pedEntity.Position = activeVehicle.Position - rgt * 2.2f + new Vector3(0, 0, 1.7f);
+                    Vector3 exitPos = activeVehicle.Position - rgt * 2.2f;
+                    Ray groundRay = new Ray(exitPos + new Vector3(0, 0, 10.0f), -Vector3.UnitZ);
+                    var ghit = space.RayIntersect(groundRay, 30.0f, collisionmeshlayers);
+                    float gZ = ghit.Hit ? ghit.Position.Z : (activeVehicle.Position.Z - vehicleGroundOffset.Z);
+                    pedEntity.Position = new Vector3(exitPos.X, exitPos.Y, gZ + 1.7f);
                     pedEntity.Velocity = Vector3.Zero;
+                    pedEntity.OnGround = true;
+                    pedVerticalVelocity = 0.0f;
+                    if (playerPed != null)
+                    {
+                        playerPed.Position = new Vector3(exitPos.X, exitPos.Y, gZ);
+                        playerPed.Rotation = Quaternion.RotationAxis(Vector3.UnitZ, vehicleHeading);
+                        playerPed.UpdateEntity();
+                    }
                 }
+                pedEntity.EnableCollisions = true;
                 pedEntity.Enabled = true;
                 camera.SetFollowEntity(pedEntity.CameraEntity);
                 camera.TargetDistance = 3.5f;
@@ -2508,27 +2538,130 @@ namespace CodeWalker
         private void UpdatePedPhysics(float elapsed, Vector2 movecontrol, bool firePressed)
         {
             Vector3 fwd = camera.ViewDirection;
-            Vector3 fwdxy = Vector3.Normalize(new Vector3(fwd.X, fwd.Y, 0));
-            Vector3 lftxy = Vector3.Normalize(Vector3.Cross(fwd, Vector3.UnitZ));
-            Vector3 move = lftxy * movecontrol.X + fwdxy * movecontrol.Y;
-            Vector2 movexy = new Vector2(move.X, move.Y);
+            Vector3 fwdxy = new Vector3(fwd.X, fwd.Y, 0);
+            if (fwdxy.LengthSquared() > 0.001f) fwdxy = Vector3.Normalize(fwdxy);
+            else fwdxy = Vector3.UnitY;
+            Vector3 lftxy = Vector3.Normalize(Vector3.Cross(fwdxy, Vector3.UnitZ));
+            Vector3 wishDir = lftxy * movecontrol.X + fwdxy * movecontrol.Y;
+            float inputLen = wishDir.Length();
+            if (inputLen > 1.0f) wishDir /= inputLen;
 
-            float boost = 1.0f + (Math.Min(Math.Max(Input.xblt, 0.0f), 1.0f) * 15.0f);
-            if (Input.ShiftPressed) boost = 2.2f;
-            movexy *= boost;
+            bool isSprinting = Input.ShiftPressed || Input.ControllerButtonPressed(GamepadButtonFlags.A | GamepadButtonFlags.RightShoulder | GamepadButtonFlags.LeftShoulder);
+            float speedMag = (inputLen > 0.05f) ? (isSprinting ? 7.5f : 3.5f) : 0.0f;
+            Vector3 horizDisp = wishDir * speedMag * elapsed;
 
-            pedEntity.ControlMovement = movexy;
-            pedEntity.ControlJump = Input.kbjump || Input.ControllerButtonPressed(GamepadButtonFlags.X);
-            pedEntity.ControlBoost = Input.ShiftPressed || Input.ControllerButtonPressed(GamepadButtonFlags.A | GamepadButtonFlags.RightShoulder | GamepadButtonFlags.LeftShoulder);
+            // Horizontal obstacle / wall collision test (knee, waist, chest heights)
+            if (horizDisp.LengthSquared() > 0.00001f)
+            {
+                Vector3 curFeet = pedEntity.Position - new Vector3(0, 0, 1.7f);
+                Vector3[] testHeights = new Vector3[]
+                {
+                    curFeet + new Vector3(0, 0, 0.4f),
+                    curFeet + new Vector3(0, 0, 1.0f),
+                    curFeet + new Vector3(0, 0, 1.5f)
+                };
+                Vector3 moveDirNorm = Vector3.Normalize(horizDisp);
+                float checkDist = horizDisp.Length() + 0.45f;
+                for (int i = 0; i < testHeights.Length; i++)
+                {
+                    Ray wallRay = new Ray(testHeights[i], moveDirNorm);
+                    var wallHit = space.RayIntersect(wallRay, checkDist, collisionmeshlayers);
+                    if (wallHit.Hit && wallHit.HitDist < checkDist && Math.Abs(wallHit.Normal.Z) < 0.65f)
+                    {
+                        Vector3 wallNorm2D = Vector3.Normalize(new Vector3(wallHit.Normal.X, wallHit.Normal.Y, 0));
+                        float intoWall = Vector3.Dot(horizDisp, wallNorm2D);
+                        if (intoWall < 0)
+                        {
+                            horizDisp -= wallNorm2D * intoWall;
+                        }
+                        break;
+                    }
+                }
+            }
+
+            Vector3 nextPos = pedEntity.Position + horizDisp;
+            float currentFeetZ = pedEntity.Position.Z - 1.7f;
+
+            // Vertical ground raycast for terrain/floor elevation clamping
+            Vector3 rayTop = new Vector3(nextPos.X, nextPos.Y, Math.Max(nextPos.Z + 2.5f, currentFeetZ + 3.0f));
+            Ray downRay = new Ray(rayTop, -Vector3.UnitZ);
+            var groundHit = space.RayIntersect(downRay, 25.0f, collisionmeshlayers);
+
+            if (groundHit.Hit)
+            {
+                float groundZ = groundHit.Position.Z;
+                float heightDiff = groundZ - currentFeetZ;
+
+                if (pedEntity.OnGround)
+                {
+                    // If on ground and slope/step is within walking threshold (up to 0.75m step, down up to 1.2m)
+                    if (heightDiff <= 0.75f && heightDiff >= -1.2f)
+                    {
+                        pedEntity.OnGround = true;
+                        pedVerticalVelocity = 0.0f;
+                        nextPos.Z = groundZ + 1.7f;
+                    }
+                    else if (heightDiff < -1.2f)
+                    {
+                        // Falling off drop or ledge
+                        pedEntity.OnGround = false;
+                        pedVerticalVelocity -= 12.0f * elapsed;
+                        nextPos.Z += pedVerticalVelocity * elapsed;
+                        if (nextPos.Z - 1.7f <= groundZ)
+                        {
+                            nextPos.Z = groundZ + 1.7f;
+                            pedVerticalVelocity = 0.0f;
+                            pedEntity.OnGround = true;
+                        }
+                    }
+                    else
+                    {
+                        // Barrier or wall too high (> 0.75m): block horizontal movement
+                        nextPos.X = pedEntity.Position.X;
+                        nextPos.Y = pedEntity.Position.Y;
+                    }
+                }
+                else
+                {
+                    // Airborne / falling
+                    pedVerticalVelocity -= 12.0f * elapsed;
+                    nextPos.Z += pedVerticalVelocity * elapsed;
+                    if (nextPos.Z - 1.7f <= groundZ)
+                    {
+                        nextPos.Z = groundZ + 1.7f;
+                        pedVerticalVelocity = 0.0f;
+                        pedEntity.OnGround = true;
+                    }
+                }
+            }
+            else
+            {
+                // Free fall
+                pedEntity.OnGround = false;
+                pedVerticalVelocity -= 12.0f * elapsed;
+                nextPos.Z += pedVerticalVelocity * elapsed;
+            }
+
+            // Jump
+            if (pedEntity.OnGround && (Input.kbjump || Input.ControllerButtonPressed(GamepadButtonFlags.X)))
+            {
+                pedVerticalVelocity = 5.2f;
+                pedEntity.OnGround = false;
+                nextPos.Z += pedVerticalVelocity * elapsed;
+            }
+
+            pedEntity.Position = nextPos;
+            pedEntity.Velocity = new Vector3(horizDisp.X / Math.Max(elapsed, 0.001f), horizDisp.Y / Math.Max(elapsed, 0.001f), pedVerticalVelocity);
+            pedEntity.ControlMovement = Vector2.Zero; // prevent double physics from Entity.PreUpdate
 
             if (playerPed != null)
             {
-                playerPed.Position = pedEntity.Position + new Vector3(0, 0, -1.7f);
+                playerPed.Position = pedEntity.Position - new Vector3(0, 0, 1.7f);
 
-                float speed = movexy.Length();
-                if (speed > 0.1f && move.LengthSquared() > 0.001f)
+                float actualSpeed = new Vector2(horizDisp.X, horizDisp.Y).Length() / Math.Max(elapsed, 0.001f);
+                if (actualSpeed > 0.1f && wishDir.LengthSquared() > 0.001f)
                 {
-                    playerPedHeading = (float)Math.Atan2(move.Y, move.X) - (float)(Math.PI / 2.0);
+                    playerPedHeading = (float)Math.Atan2(wishDir.Y, wishDir.X) - (float)(Math.PI / 2.0);
                 }
                 else if (firePressed)
                 {
@@ -2536,11 +2669,11 @@ namespace CodeWalker
                 }
                 playerPed.Rotation = Quaternion.RotationAxis(Vector3.UnitZ, playerPedHeading);
 
-                if (speed > 4.0f && pedRunClip != null)
+                if (actualSpeed > 4.5f && pedRunClip != null)
                 {
                     playerPed.AnimClip = pedRunClip;
                 }
-                else if (speed > 0.2f && pedWalkClip != null)
+                else if (actualSpeed > 0.2f && pedWalkClip != null)
                 {
                     playerPed.AnimClip = pedWalkClip;
                 }
@@ -2606,7 +2739,7 @@ namespace CodeWalker
             float maxReverse = -12.0f;
             float accelRate = 22.0f;
             float brakeRate = 35.0f;
-            float dragRate = 4.0f;
+            float dragRate = 5.0f;
             float turnRate = 2.2f;
 
             if (throttle > 0.05f)
@@ -2641,10 +2774,24 @@ namespace CodeWalker
             Vector3 fwd = new Vector3(-(float)Math.Sin(vehicleHeading), (float)Math.Cos(vehicleHeading), 0.0f);
             Vector3 rgt = new Vector3((float)Math.Cos(vehicleHeading), (float)Math.Sin(vehicleHeading), 0.0f);
 
-            Vector3 nextPos = activeVehicle.Position + fwd * vehicleSpeed * elapsed;
-
             float halfLength = 2.2f;
             float halfWidth = 1.0f;
+
+            // Bumper obstacle collision check (front & rear)
+            if (Math.Abs(vehicleSpeed) > 0.1f)
+            {
+                Vector3 bumperDir = (vehicleSpeed > 0) ? fwd : -fwd;
+                Vector3 bumperStart = activeVehicle.Position + Vector3.UnitZ * 0.5f;
+                Ray bumperRay = new Ray(bumperStart, bumperDir);
+                var bumperHit = space.RayIntersect(bumperRay, halfLength + 0.6f, collisionmeshlayers);
+                if (bumperHit.Hit && bumperHit.HitDist < halfLength + 0.5f && Math.Abs(bumperHit.Normal.Z) < 0.6f)
+                {
+                    vehicleSpeed = 0.0f; // Crash stop
+                }
+            }
+
+            Vector3 nextPos = activeVehicle.Position + fwd * vehicleSpeed * elapsed;
+
             Vector3[] wheelOffsets = new Vector3[]
             {
                 fwd * halfLength + rgt * halfWidth,
@@ -2659,9 +2806,9 @@ namespace CodeWalker
 
             for (int i = 0; i < 4; i++)
             {
-                Vector3 rayStart = nextPos + wheelOffsets[i] + Vector3.UnitZ * 2.0f;
+                Vector3 rayStart = nextPos + wheelOffsets[i] + Vector3.UnitZ * 3.5f;
                 Ray ray = new Ray(rayStart, -Vector3.UnitZ);
-                var hit = space.RayIntersect(ray, 6.0f, collisionmeshlayers);
+                var hit = space.RayIntersect(ray, 15.0f, collisionmeshlayers);
                 if (hit.Hit)
                 {
                     sumZ += hit.Position.Z;
@@ -2670,15 +2817,20 @@ namespace CodeWalker
                 }
             }
 
-            float groundZ = nextPos.Z;
             Vector3 upVec = Vector3.UnitZ;
             if (hitCount > 0)
             {
-                groundZ = (sumZ / hitCount) + vehicleGroundOffset.Z;
+                float targetGroundZ = (sumZ / hitCount) + vehicleGroundOffset.Z;
                 upVec = Vector3.Normalize(sumNormal / hitCount);
+                vehicleVerticalVelocity = 0.0f;
+                nextPos.Z = nextPos.Z + (targetGroundZ - nextPos.Z) * Math.Min(1.0f, 18.0f * elapsed);
             }
-
-            nextPos.Z = nextPos.Z + (groundZ - nextPos.Z) * Math.Min(1.0f, 15.0f * elapsed);
+            else
+            {
+                // Airborne / jump
+                vehicleVerticalVelocity -= 9.8f * elapsed;
+                nextPos.Z += vehicleVerticalVelocity * elapsed;
+            }
 
             Quaternion yawRot = Quaternion.RotationAxis(Vector3.UnitZ, vehicleHeading);
             float pitch = -Vector3.Dot(upVec, fwd) * 0.6f;
@@ -2772,7 +2924,19 @@ namespace CodeWalker
                 Ped newPed = new Ped();
                 newPed.Init(pedName, gameFileCache);
                 newPed.LoadDefaultComponents(gameFileCache);
-                newPed.Position = pedEntity.Position + new Vector3(0, 0, -1.7f);
+                Vector3 spawnRef = (ControlMode == WorldControlMode.Ped) ? pedEntity.Position : camEntity.Position;
+                Ray groundRay = new Ray(spawnRef + new Vector3(0, 0, 30.0f), -Vector3.UnitZ);
+                var ghit = space.RayIntersect(groundRay, 100.0f, collisionmeshlayers);
+                float groundZ = ghit.Hit ? ghit.Position.Z : (spawnRef.Z - 1.7f);
+
+                pedEntity.Position = new Vector3(spawnRef.X, spawnRef.Y, groundZ + 1.7f);
+                pedEntity.Velocity = Vector3.Zero;
+                pedEntity.EnableCollisions = true;
+                pedEntity.Enabled = true;
+                pedEntity.OnGround = true;
+                pedVerticalVelocity = 0.0f;
+
+                newPed.Position = new Vector3(spawnRef.X, spawnRef.Y, groundZ);
                 newPed.Rotation = Quaternion.RotationAxis(Vector3.UnitZ, playerPedHeading);
                 newPed.UpdateEntity();
 
@@ -2789,6 +2953,13 @@ namespace CodeWalker
                 if (playerWeapon != null)
                 {
                     GivePlayerWeapon(playerWeapon.Name);
+                }
+
+                if (ControlMode != WorldControlMode.Ped && ControlMode != WorldControlMode.Car)
+                {
+                    this.BeginInvoke(new Action(() => {
+                        SetControlMode(WorldControlMode.Ped);
+                    }));
                 }
             }
             catch (Exception ex)
@@ -2840,23 +3011,22 @@ namespace CodeWalker
                 }
                 vehicleGroundOffset = new Vector3(0, 0, -minZ);
 
-                Vector3 spawnPos = (ControlMode == WorldControlMode.Ped) ? pedEntity.Position : camEntity.Position;
+                Vector3 spawnPos = (ControlMode == WorldControlMode.Ped) ? (pedEntity.Position - new Vector3(0, 0, 1.7f)) : camEntity.Position;
                 Vector3 fwd = camera.ViewDirection;
                 Vector3 fwdxy = Vector3.Normalize(new Vector3(fwd.X, fwd.Y, 0));
-                if (enterImmediately)
-                {
-                    newVeh.Position = spawnPos + new Vector3(0, 0, -1.7f + vehicleGroundOffset.Z);
-                }
-                else
-                {
-                    newVeh.Position = spawnPos + fwdxy * 4.0f + new Vector3(0, 0, -1.7f + vehicleGroundOffset.Z);
-                }
+                Vector3 targetXY = enterImmediately ? spawnPos : (spawnPos + fwdxy * 4.0f);
 
+                Ray groundRay = new Ray(targetXY + new Vector3(0, 0, 30.0f), -Vector3.UnitZ);
+                var ghit = space.RayIntersect(groundRay, 100.0f, collisionmeshlayers);
+                float groundZ = ghit.Hit ? ghit.Position.Z : targetXY.Z;
+
+                newVeh.Position = new Vector3(targetXY.X, targetXY.Y, groundZ + vehicleGroundOffset.Z);
                 vehicleHeading = (float)Math.Atan2(fwdxy.Y, fwdxy.X) - (float)(Math.PI / 2.0);
                 newVeh.Rotation = Quaternion.RotationAxis(Vector3.UnitZ, vehicleHeading);
                 newVeh.UpdateEntity();
 
                 vehicleSpeed = 0.0f;
+                vehicleVerticalVelocity = 0.0f;
 
                 lock (Renderer.RenderSyncRoot)
                 {

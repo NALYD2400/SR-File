@@ -1,4 +1,4 @@
-﻿using CodeWalker.GameFiles;
+using CodeWalker.GameFiles;
 using SharpDX;
 using System;
 using System.Collections.Generic;
@@ -44,7 +44,7 @@ namespace CodeWalker.World
         public SpaceNavGrid NavGrid;
 
         public List<SpaceEntityCollision> Collisions = new List<SpaceEntityCollision>();
-        private bool[] CollisionLayers = new[] { true, false, false };
+        public bool[] CollisionLayers = new[] { true, true, true };
 
         private int CurrentHour;
         private MetaHash CurrentWeather;
