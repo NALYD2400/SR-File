@@ -880,4 +880,255 @@ namespace SRFile.Sidecar.Tests
             }
         }
     }
+
+    public class RpfCacheAndBatchExtractionTests
+    {
+        [Fact]
+        public void CacheStats_TracksHitsMissesAndClearsProperly()
+        {
+            string tempDir = Path.Combine(Path.GetTempPath(), "SRFile_CacheTest_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            string rpfPath = Path.Combine(tempDir, "cache_test.rpf");
+
+            try
+            {
+                var rpf = CodeWalker.GameFiles.RpfFile.CreateNew(tempDir, "cache_test.rpf", CodeWalker.GameFiles.RpfEncryption.OPEN);
+                var dir = CodeWalker.GameFiles.RpfFile.CreateDirectory(rpf.Root, "cfg");
+                byte[] content = Encoding.UTF8.GetBytes("speed=250");
+                CodeWalker.GameFiles.RpfFile.CreateFile(dir, "tuning.meta", content, true);
+
+                var service = new RpfService();
+                var info = service.OpenRpf(rpfPath);
+                Assert.NotNull(info);
+
+                var initialStats = service.GetCacheStats();
+                Assert.Equal(1, initialStats.LoadedRpfsCount);
+                Assert.NotEmpty(initialStats.OpenArchives);
+
+                // First access - can be miss or index hit
+                byte[] data1 = service.ExtractFile(rpfPath, "cfg\\tuning.meta");
+                Assert.Equal(content, data1);
+
+                // Second access - should hit the indexed cache
+                byte[] data2 = service.ExtractFile(rpfPath, "cfg\\tuning.meta");
+                Assert.Equal(content, data2);
+
+                var updatedStats = service.GetCacheStats();
+                Assert.True(updatedStats.CacheHits > 0);
+
+                // Close RPF
+                bool closed = service.CloseRpf(rpfPath);
+                Assert.True(closed);
+                var closedStats = service.GetCacheStats();
+                Assert.Equal(0, closedStats.LoadedRpfsCount);
+
+                // Clear Cache
+                service.OpenRpf(rpfPath);
+                Assert.Equal(1, service.GetCacheStats().LoadedRpfsCount);
+                int cleared = service.ClearCache();
+                Assert.Equal(1, cleared);
+                Assert.Equal(0, service.GetCacheStats().LoadedRpfsCount);
+            }
+            finally
+            {
+                if (Directory.Exists(tempDir))
+                {
+                    try { Directory.Delete(tempDir, true); } catch { }
+                }
+            }
+        }
+
+        [Fact]
+        public void ExtractFolderToDisk_And_ExtractFolderToZip_WorkCorrectly()
+        {
+            string tempDir = Path.Combine(Path.GetTempPath(), "SRFile_BatchTest_" + Guid.NewGuid().ToString("N"));
+            string exportDir = Path.Combine(tempDir, "exported");
+            Directory.CreateDirectory(tempDir);
+            string rpfPath = Path.Combine(tempDir, "batch.rpf");
+
+            try
+            {
+                var rpf = CodeWalker.GameFiles.RpfFile.CreateNew(tempDir, "batch.rpf", CodeWalker.GameFiles.RpfEncryption.OPEN);
+                var audioDir = CodeWalker.GameFiles.RpfFile.CreateDirectory(rpf.Root, "audio");
+                var sfxDir = CodeWalker.GameFiles.RpfFile.CreateDirectory(audioDir, "sfx");
+
+                byte[] fileA = Encoding.UTF8.GetBytes("AudioTrackA");
+                byte[] fileB = Encoding.UTF8.GetBytes("AudioTrackB");
+                CodeWalker.GameFiles.RpfFile.CreateFile(audioDir, "meta.dat", fileA, true);
+                CodeWalker.GameFiles.RpfFile.CreateFile(sfxDir, "horn.wav", fileB, true);
+
+                var service = new RpfService();
+                service.OpenRpf(rpfPath);
+
+                // 1. Extract Folder to Disk
+                var diskResult = service.ExtractFolderToDisk(rpfPath, "audio", exportDir, recursive: true);
+                Assert.True(diskResult.Success);
+                Assert.Equal(2, diskResult.ExtractedCount);
+                Assert.Equal(0, diskResult.ErrorCount);
+                Assert.True(File.Exists(Path.Combine(exportDir, "meta.dat")));
+                Assert.True(File.Exists(Path.Combine(exportDir, "sfx", "horn.wav")));
+
+                // 2. Extract Folder to Zip
+                byte[] zipBytes = service.ExtractFolderToZip(rpfPath, "audio", recursive: true);
+                Assert.NotNull(zipBytes);
+                Assert.True(zipBytes.Length > 0);
+
+                using (var zipStream = new MemoryStream(zipBytes))
+                using (var archive = new System.IO.Compression.ZipArchive(zipStream, System.IO.Compression.ZipArchiveMode.Read))
+                {
+                    Assert.Equal(2, archive.Entries.Count);
+                    Assert.Contains(archive.Entries, e => e.FullName.Replace('\\', '/') == "meta.dat");
+                    Assert.Contains(archive.Entries, e => e.FullName.Replace('\\', '/') == "sfx/horn.wav");
+                }
+
+                // 3. Extract Batch to Disk
+                string batchOut = Path.Combine(tempDir, "batch_out");
+                var batchResult = service.ExtractBatchToDisk(rpfPath, new List<string> { "audio\\meta.dat", "non_existent.xml" }, batchOut);
+                Assert.False(batchResult.Success);
+                Assert.Equal(1, batchResult.ExtractedCount);
+                Assert.Equal(1, batchResult.ErrorCount);
+                Assert.True(File.Exists(Path.Combine(batchOut, "meta.dat")));
+
+                // 4. Extract Batch to Zip
+                byte[] batchZip = service.ExtractBatchToZip(rpfPath, new List<string> { "audio\\meta.dat" });
+                using (var bzStream = new MemoryStream(batchZip))
+                using (var bzArchive = new System.IO.Compression.ZipArchive(bzStream, System.IO.Compression.ZipArchiveMode.Read))
+                {
+                    Assert.Single(bzArchive.Entries);
+                    Assert.Equal("meta.dat", bzArchive.Entries[0].Name);
+                }
+            }
+            finally
+            {
+                if (Directory.Exists(tempDir))
+                {
+                    try { Directory.Delete(tempDir, true); } catch { }
+                }
+            }
+        }
+    }
+
+    public class SystemServiceTests
+    {
+        [Fact]
+        public void GetMetrics_ReturnsCompleteDiagnostics()
+        {
+            var rpfService = new RpfService();
+            var systemService = new SystemService(rpfService);
+
+            var metrics = systemService.GetMetrics();
+
+            Assert.NotNull(metrics);
+            Assert.True(metrics.ProcessWorkingSetBytes > 0);
+            Assert.True(metrics.ProcessWorkingSetMB > 0);
+            Assert.True(metrics.ProcessPrivateMemoryBytes > 0);
+            Assert.True(metrics.ProcessId > 0);
+            Assert.True(metrics.ThreadCount > 0);
+            Assert.True(metrics.ProcessorCount > 0);
+            Assert.NotEmpty(metrics.OsPlatform);
+            Assert.NotEmpty(metrics.FrameworkDescription);
+            Assert.Contains(".NET", metrics.FrameworkDescription);
+            Assert.True(metrics.UptimeSeconds >= 0);
+            Assert.NotNull(metrics.OpenArchives);
+            Assert.Equal(0, metrics.OpenArchivesCount);
+        }
+    }
+
+    public class TextServiceTests
+    {
+        [Fact]
+        public void BuildGxt2_And_ParseGxt2_RoundtripSucceeds()
+        {
+            var service = new TextService();
+            string sourceText = "0x12345678 = Test Subtitle Line\nVEH_TURISMO = Grotti Turismo R\n0xAABBCCDD: Another Weapon";
+
+            byte[] gxtBytes = service.BuildGxt2(sourceText, "american.gxt2");
+            Assert.NotNull(gxtBytes);
+            Assert.True(gxtBytes.Length > 16);
+
+            // Check GXT2 magic signature (1196971058 or "GXT2")
+            uint magic = BitConverter.ToUInt32(gxtBytes, 0);
+            Assert.Equal(1196971058u, magic);
+
+            var table = service.ParseGxt2(gxtBytes, "american.gxt2");
+            Assert.NotNull(table);
+            Assert.Equal(3u, table.EntryCount);
+            Assert.Contains(table.Entries, e => e.HexHash == "0x12345678" && e.Text == "Test Subtitle Line");
+            Assert.Contains(table.Entries, e => e.Text == "Grotti Turismo R");
+            Assert.Contains(table.Entries, e => e.HexHash == "0xAABBCCDD" && e.Text == "Another Weapon");
+        }
+
+        [Fact]
+        public void SearchGxt2_FindsMatchesBySubstringAndHash()
+        {
+            var service = new TextService();
+            string sourceText = "0x11111111 = Mission Passed\n0x22222222 = Mission Failed\n0x33333333 = Wasted";
+            byte[] bytes = service.BuildGxt2(sourceText);
+            var table = service.ParseGxt2(bytes);
+
+            // Substring search
+            var passedMatches = service.SearchGxt2(table, "Passed");
+            Assert.Single(passedMatches);
+            Assert.Equal("Mission Passed", passedMatches[0].Text);
+
+            // Hex hash search
+            var hexMatches = service.SearchGxt2(table, "0x33333333");
+            Assert.Single(hexMatches);
+            Assert.Equal("Wasted", hexMatches[0].Text);
+
+            // Empty / no match
+            var noMatches = service.SearchGxt2(table, "NonExistentWord");
+            Assert.Empty(noMatches);
+        }
+
+        [Fact]
+        public void ExportToText_FormatsCorrectly()
+        {
+            var service = new TextService();
+            var entries = new List<Models.Gxt2EntryDto>
+            {
+                new Models.Gxt2EntryDto(0x1234ABCD, "0x1234ABCD", "Hello Los Santos", null),
+                new Models.Gxt2EntryDto(0xCAFEBABE, "0xCAFEBABE", "Welcome to Blaine County", null)
+            };
+
+            string text = service.ExportToText(entries);
+            Assert.Contains("0x1234ABCD = Hello Los Santos", text);
+            Assert.Contains("0xCAFEBABE = Welcome to Blaine County", text);
+        }
+
+        [Fact]
+        public void SearchRpfGxt2_FindsEntriesInRpfArchive()
+        {
+            string tempDir = Path.Combine(Path.GetTempPath(), "SRFile_GxtRpfTest_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            string rpfPath = Path.Combine(tempDir, "text_archive.rpf");
+
+            try
+            {
+                var textService = new TextService();
+                byte[] gxtData = textService.BuildGxt2("0x99999999 = Secret Agent Car\n0x88888888 = Weapon Silencer");
+
+                var rpf = CodeWalker.GameFiles.RpfFile.CreateNew(tempDir, "text_archive.rpf", CodeWalker.GameFiles.RpfEncryption.OPEN);
+                var textDir = CodeWalker.GameFiles.RpfFile.CreateDirectory(rpf.Root, "text");
+                CodeWalker.GameFiles.RpfFile.CreateFile(textDir, "global.gxt2", gxtData, true);
+
+                var rpfService = new RpfService();
+                rpfService.OpenRpf(rpfPath);
+
+                var results = textService.SearchRpfGxt2(rpfService, rpfPath, "Secret");
+                Assert.Single(results);
+                Assert.Equal("Secret Agent Car", results[0].Text);
+                Assert.Equal("0x99999999", results[0].HexHash);
+                Assert.Contains("global.gxt2", results[0].EntryPath);
+            }
+            finally
+            {
+                if (Directory.Exists(tempDir))
+                {
+                    try { Directory.Delete(tempDir, true); } catch { }
+                }
+            }
+        }
+    }
 }
+

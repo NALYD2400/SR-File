@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using CodeWalker.GameFiles;
 using CodeWalker.Utils;
 using SRFile.Sidecar.Models;
@@ -14,7 +17,13 @@ namespace SRFile.Sidecar.Services
     public class RpfService
     {
         private readonly ConcurrentDictionary<string, RpfFile> _loadedRpfs = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, RpfIndex> _rpfIndexes = new(StringComparer.OrdinalIgnoreCase);
         private readonly DateTime _startTime = DateTime.UtcNow;
+        private long _cacheHits;
+        private long _cacheMisses;
+
+        public long CacheHits => Interlocked.Read(ref _cacheHits);
+        public long CacheMisses => Interlocked.Read(ref _cacheMisses);
 
         public string? GtaFolder { get; private set; }
         public bool IsGen9 { get; private set; }
@@ -88,6 +97,7 @@ namespace SRFile.Sidecar.Services
             }
 
             _loadedRpfs[fullPath] = rpf;
+            _rpfIndexes[fullPath] = RpfIndex.Build(rpf);
             return ToRpfInfo(rpf);
         }
 
@@ -439,22 +449,275 @@ namespace SRFile.Sidecar.Services
             return null;
         }
 
-        private static RpfDirectoryEntry? FindDirectory(RpfFile rootRpf, string relativePath)
+        public RpfFile? GetLoadedRpf(string rpfPath) => GetOrLoadRpf(rpfPath);
+
+        public bool CloseRpf(string filePath)
+        {
+            string full = Path.GetFullPath(filePath);
+            bool removed = _loadedRpfs.TryRemove(full, out _);
+            _rpfIndexes.TryRemove(full, out _);
+            return removed;
+        }
+
+        public int ClearCache()
+        {
+            int count = _loadedRpfs.Count;
+            _loadedRpfs.Clear();
+            _rpfIndexes.Clear();
+            return count;
+        }
+
+        public RpfCacheStats GetCacheStats()
+        {
+            long hits = CacheHits;
+            long misses = CacheMisses;
+            long total = hits + misses;
+            double rate = total > 0 ? Math.Round((double)hits / total * 100.0, 2) : 0.0;
+
+            long totalIndexed = _rpfIndexes.Values.Sum(idx => (long)idx.FileLookup.Count + idx.DirLookup.Count);
+
+            var archives = _loadedRpfs.Select(kvp => new RpfCacheItemDto(
+                Name: kvp.Value.Name ?? Path.GetFileName(kvp.Key),
+                FilePath: kvp.Key,
+                FileSize: kvp.Value.FileSize,
+                EntryCount: kvp.Value.EntryCount
+            )).ToList();
+
+            return new RpfCacheStats(
+                LoadedRpfsCount: _loadedRpfs.Count,
+                TotalIndexedEntries: totalIndexed,
+                CacheHits: hits,
+                CacheMisses: misses,
+                HitRatePercent: rate,
+                OpenArchives: archives
+            );
+        }
+
+        public BatchExtractResultDto ExtractFolderToDisk(string rpfPath, string folderPath, string outputDir, bool recursive = true)
+        {
+            var sw = Stopwatch.StartNew();
+            var rpf = GetOrLoadRpf(rpfPath);
+            if (rpf == null) throw new FileNotFoundException("RPF not open");
+
+            var dir = FindDirectory(rpf, folderPath);
+            if (dir == null) throw new DirectoryNotFoundException($"Directory '{folderPath}' not found in RPF.");
+
+            var fileList = new List<(RpfFileEntry File, string RelPath)>();
+            CollectDirectoryFiles(dir, "", recursive, fileList);
+
+            int extracted = 0;
+            int errors = 0;
+            long totalBytes = 0;
+            var errorList = new List<string>();
+
+            Directory.CreateDirectory(outputDir);
+
+            foreach (var (entry, relPath) in fileList)
+            {
+                try
+                {
+                    byte[] data = entry.File.ExtractFile(entry);
+                    string dest = Path.Combine(outputDir, relPath);
+                    string? pDir = Path.GetDirectoryName(dest);
+                    if (!string.IsNullOrEmpty(pDir) && !Directory.Exists(pDir))
+                    {
+                        Directory.CreateDirectory(pDir);
+                    }
+                    File.WriteAllBytes(dest, data);
+                    extracted++;
+                    totalBytes += data.Length;
+                }
+                catch (Exception ex)
+                {
+                    errors++;
+                    errorList.Add($"{entry.Path}: {ex.Message}");
+                }
+            }
+
+            sw.Stop();
+            return new BatchExtractResultDto(
+                Success: errors == 0,
+                ExtractedCount: extracted,
+                ErrorCount: errors,
+                TotalBytes: totalBytes,
+                DurationMs: sw.ElapsedMilliseconds,
+                OutputDirectory: outputDir,
+                Errors: errorList
+            );
+        }
+
+        public byte[] ExtractFolderToZip(string rpfPath, string folderPath, bool recursive = true)
+        {
+            var rpf = GetOrLoadRpf(rpfPath);
+            if (rpf == null) throw new FileNotFoundException("RPF not open");
+
+            var dir = FindDirectory(rpf, folderPath);
+            if (dir == null) throw new DirectoryNotFoundException($"Directory '{folderPath}' not found in RPF.");
+
+            var fileList = new List<(RpfFileEntry File, string RelPath)>();
+            CollectDirectoryFiles(dir, "", recursive, fileList);
+
+            using var ms = new MemoryStream();
+            using (var archive = new ZipArchive(ms, ZipArchiveMode.Create, true))
+            {
+                foreach (var (entry, relPath) in fileList)
+                {
+                    try
+                    {
+                        byte[] data = entry.File.ExtractFile(entry);
+                        var zipEntry = archive.CreateEntry(relPath.Replace('\\', '/'), CompressionLevel.Fastest);
+                        using var s = zipEntry.Open();
+                        s.Write(data, 0, data.Length);
+                    }
+                    catch
+                    {
+                        // Ignore individual extraction failures in zip archive
+                    }
+                }
+            }
+            return ms.ToArray();
+        }
+
+        public BatchExtractResultDto ExtractBatchToDisk(string rpfPath, List<string> entryPaths, string outputDir)
+        {
+            var sw = Stopwatch.StartNew();
+            var rpf = GetOrLoadRpf(rpfPath);
+            if (rpf == null) throw new FileNotFoundException("RPF not open");
+
+            int extracted = 0;
+            int errors = 0;
+            long totalBytes = 0;
+            var errorList = new List<string>();
+
+            Directory.CreateDirectory(outputDir);
+
+            foreach (var path in entryPaths)
+            {
+                try
+                {
+                    var entry = FindFileEntry(rpf, path);
+                    if (entry == null)
+                    {
+                        errors++;
+                        errorList.Add($"Entry not found: {path}");
+                        continue;
+                    }
+
+                    byte[] data = entry.File.ExtractFile(entry);
+                    string dest = Path.Combine(outputDir, entry.Name);
+                    File.WriteAllBytes(dest, data);
+                    extracted++;
+                    totalBytes += data.Length;
+                }
+                catch (Exception ex)
+                {
+                    errors++;
+                    errorList.Add($"{path}: {ex.Message}");
+                }
+            }
+
+            sw.Stop();
+            return new BatchExtractResultDto(
+                Success: errors == 0,
+                ExtractedCount: extracted,
+                ErrorCount: errors,
+                TotalBytes: totalBytes,
+                DurationMs: sw.ElapsedMilliseconds,
+                OutputDirectory: outputDir,
+                Errors: errorList
+            );
+        }
+
+        public byte[] ExtractBatchToZip(string rpfPath, List<string> entryPaths)
+        {
+            var rpf = GetOrLoadRpf(rpfPath);
+            if (rpf == null) throw new FileNotFoundException("RPF not open");
+
+            using var ms = new MemoryStream();
+            using (var archive = new ZipArchive(ms, ZipArchiveMode.Create, true))
+            {
+                foreach (var path in entryPaths)
+                {
+                    try
+                    {
+                        var entry = FindFileEntry(rpf, path);
+                        if (entry == null) continue;
+
+                        byte[] data = entry.File.ExtractFile(entry);
+                        var zipEntry = archive.CreateEntry(entry.Name, CompressionLevel.Fastest);
+                        using var s = zipEntry.Open();
+                        s.Write(data, 0, data.Length);
+                    }
+                    catch
+                    {
+                        // Ignore individual extraction failures
+                    }
+                }
+            }
+            return ms.ToArray();
+        }
+
+        public List<string> FindGxt2Files(string rpfPath)
+        {
+            var rpf = GetOrLoadRpf(rpfPath);
+            if (rpf == null) throw new FileNotFoundException("RPF not open");
+
+            var idx = GetOrBuildIndex(rpf);
+            return idx.Gxt2Entries.Select(e => e.Path ?? e.Name).ToList();
+        }
+
+        private static void CollectDirectoryFiles(RpfDirectoryEntry dir, string currentRel, bool recursive, List<(RpfFileEntry File, string RelPath)> collector)
+        {
+            if (dir.Files != null)
+            {
+                foreach (var f in dir.Files)
+                {
+                    string rel = string.IsNullOrEmpty(currentRel) ? f.Name : Path.Combine(currentRel, f.Name);
+                    collector.Add((f, rel));
+                }
+            }
+            if (recursive && dir.Directories != null)
+            {
+                foreach (var sub in dir.Directories)
+                {
+                    string rel = string.IsNullOrEmpty(currentRel) ? sub.Name : Path.Combine(currentRel, sub.Name);
+                    CollectDirectoryFiles(sub, rel, recursive, collector);
+                }
+            }
+        }
+
+        public RpfIndex GetOrBuildIndex(RpfFile rootRpf)
+        {
+            string key = rootRpf.FilePath ?? rootRpf.Name ?? "root";
+            return _rpfIndexes.GetOrAdd(key, _ => RpfIndex.Build(rootRpf));
+        }
+
+        private RpfDirectoryEntry? FindDirectory(RpfFile rootRpf, string relativePath)
         {
             if (string.IsNullOrWhiteSpace(relativePath) || relativePath == "/" || relativePath == "\\")
             {
                 return rootRpf.Root;
             }
 
-            string norm = relativePath.Replace('/', '\\').Trim('\\').ToLowerInvariant();
+            string norm = RpfIndex.Normalize(relativePath);
+            var index = GetOrBuildIndex(rootRpf);
+
+            if (index.DirLookup.TryGetValue(norm, out var cachedDir))
+            {
+                Interlocked.Increment(ref _cacheHits);
+                return cachedDir;
+            }
+
+            Interlocked.Increment(ref _cacheMisses);
 
             foreach (var rpf in GetAllRpfs(rootRpf))
             {
                 // 1. Path matches root of this RPF
-                if (string.Equals(rpf.Path?.ToLowerInvariant(), norm, StringComparison.OrdinalIgnoreCase) ||
+                if (rpf.Root != null && (string.Equals(rpf.Path?.ToLowerInvariant(), norm, StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(rpf.NameLower, norm, StringComparison.OrdinalIgnoreCase) ||
-                    (rpf.Root?.Path != null && string.Equals(rpf.Root.Path.ToLowerInvariant(), norm, StringComparison.OrdinalIgnoreCase)))
+                    (rpf.Root.Path != null && string.Equals(rpf.Root.Path.ToLowerInvariant(), norm, StringComparison.OrdinalIgnoreCase))))
                 {
+                    index.DirLookup.TryAdd(norm, rpf.Root);
                     return rpf.Root;
                 }
 
@@ -462,13 +725,13 @@ namespace SRFile.Sidecar.Services
                 if (rpf.AllEntries != null)
                 {
                     var match = rpf.AllEntries.OfType<RpfDirectoryEntry>().FirstOrDefault(d =>
-                        string.Equals(d.Path?.ToLowerInvariant(), norm, StringComparison.OrdinalIgnoreCase));
-                    if (match != null) return match;
-
-                    // Relative path suffix match (e.g. "data" matches "test.rpf\data")
-                    match = rpf.AllEntries.OfType<RpfDirectoryEntry>().FirstOrDefault(d =>
-                        d.Path != null && d.Path.ToLowerInvariant().EndsWith("\\" + norm));
-                    if (match != null) return match;
+                        string.Equals(d.Path?.ToLowerInvariant(), norm, StringComparison.OrdinalIgnoreCase) ||
+                        (d.Path != null && d.Path.ToLowerInvariant().EndsWith("\\" + norm)));
+                    if (match != null)
+                    {
+                        index.DirLookup.TryAdd(norm, match);
+                        return match;
+                    }
                 }
 
                 // 3. Hierarchical path walk
@@ -498,39 +761,49 @@ namespace SRFile.Sidecar.Services
                         }
                         walkDir = next;
                     }
-                    if (walked && walkDir != null) return walkDir;
+                    if (walked && walkDir != null)
+                    {
+                        index.DirLookup.TryAdd(norm, walkDir);
+                        return walkDir;
+                    }
                 }
             }
 
             return null;
         }
 
-        private static RpfFileEntry? FindFileEntry(RpfFile rootRpf, string entryPath)
+        private RpfFileEntry? FindFileEntry(RpfFile rootRpf, string entryPath)
         {
             if (string.IsNullOrWhiteSpace(entryPath)) return null;
 
-            string norm = entryPath.Replace('/', '\\').Trim('\\').ToLowerInvariant();
-            string fileName = Path.GetFileName(norm);
+            string norm = RpfIndex.Normalize(entryPath);
+            var index = GetOrBuildIndex(rootRpf);
 
+            if (index.FileLookup.TryGetValue(norm, out var cached))
+            {
+                Interlocked.Increment(ref _cacheHits);
+                return cached;
+            }
+
+            Interlocked.Increment(ref _cacheMisses);
+
+            string fileName = Path.GetFileName(norm);
             foreach (var rpf in GetAllRpfs(rootRpf))
             {
                 if (rpf.AllEntries == null) continue;
 
                 // 1. Exact path match
                 var match = rpf.AllEntries.OfType<RpfFileEntry>().FirstOrDefault(f =>
-                    string.Equals(f.Path?.ToLowerInvariant(), norm, StringComparison.OrdinalIgnoreCase));
-                if (match != null) return match;
-
-                // 2. Ends with match (relative path match e.g. "data\settings.xml")
-                match = rpf.AllEntries.OfType<RpfFileEntry>().FirstOrDefault(f =>
-                    f.Path != null && f.Path.ToLowerInvariant().EndsWith("\\" + norm));
-                if (match != null) return match;
-
-                // 3. Exact filename match as fallback
-                match = rpf.AllEntries.OfType<RpfFileEntry>().FirstOrDefault(f =>
+                    string.Equals(f.Path?.ToLowerInvariant(), norm, StringComparison.OrdinalIgnoreCase) ||
+                    (f.Path != null && f.Path.ToLowerInvariant().EndsWith("\\" + norm)) ||
                     string.Equals(f.NameLower, fileName, StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(f.NameLower, norm, StringComparison.OrdinalIgnoreCase));
-                if (match != null) return match;
+
+                if (match != null)
+                {
+                    index.FileLookup.TryAdd(norm, match);
+                    return match;
+                }
             }
 
             return null;
@@ -551,4 +824,70 @@ namespace SRFile.Sidecar.Services
             );
         }
     }
+
+    public class RpfIndex
+    {
+        public ConcurrentDictionary<string, RpfFileEntry> FileLookup { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public ConcurrentDictionary<string, RpfDirectoryEntry> DirLookup { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public List<RpfFileEntry> Gxt2Entries { get; } = new();
+
+        public static RpfIndex Build(RpfFile rootRpf)
+        {
+            var index = new RpfIndex();
+            foreach (var rpf in RpfService.GetAllRpfs(rootRpf))
+            {
+                if (rpf.Root != null)
+                {
+                    index.DirLookup[""] = rpf.Root;
+                    index.DirLookup["/"] = rpf.Root;
+                    index.DirLookup["\\"] = rpf.Root;
+                    if (!string.IsNullOrEmpty(rpf.Root.Path))
+                    {
+                        index.DirLookup[Normalize(rpf.Root.Path)] = rpf.Root;
+                    }
+                }
+
+                if (rpf.AllEntries != null)
+                {
+                    foreach (var entry in rpf.AllEntries)
+                    {
+                        if (entry is RpfDirectoryEntry dir)
+                        {
+                            if (!string.IsNullOrEmpty(dir.Path))
+                            {
+                                index.DirLookup[Normalize(dir.Path)] = dir;
+                            }
+                            if (!string.IsNullOrEmpty(dir.Name))
+                            {
+                                index.DirLookup.TryAdd(Normalize(dir.Name), dir);
+                            }
+                        }
+                        else if (entry is RpfFileEntry file)
+                        {
+                            if (!string.IsNullOrEmpty(file.Path))
+                            {
+                                index.FileLookup[Normalize(file.Path)] = file;
+                            }
+                            if (!string.IsNullOrEmpty(file.Name))
+                            {
+                                index.FileLookup.TryAdd(Normalize(file.Name), file);
+                            }
+
+                            if (file.NameLower != null && file.NameLower.EndsWith(".gxt2"))
+                            {
+                                index.Gxt2Entries.Add(file);
+                            }
+                        }
+                    }
+                }
+            }
+            return index;
+        }
+
+        public static string Normalize(string path)
+        {
+            return path.Replace('/', '\\').Trim('\\').ToLowerInvariant();
+        }
+    }
 }
+

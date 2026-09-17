@@ -27,6 +27,8 @@ builder.Services.AddSingleton<ModManagerService>();
 builder.Services.AddSingleton<Gen9ConverterService>();
 builder.Services.AddSingleton<CryptoService>();
 builder.Services.AddSingleton<ProjectEditorService>();
+builder.Services.AddSingleton<SystemService>();
+builder.Services.AddSingleton<TextService>();
 
 builder.Services.AddCors(options =>
 {
@@ -193,6 +195,73 @@ app.MapGet("/api/rpf/audio/wav", (string rpfPath, string entryPath, int? stream,
     {
         var wavStream = service.GetAudioWav(rpfPath, entryPath, stream ?? 0);
         return Results.Stream(wavStream, "audio/wav", enableRangeProcessing: true);
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapGet("/api/rpf/cache/stats", (RpfService service) =>
+{
+    return Results.Ok(service.GetCacheStats());
+});
+
+app.MapPost("/api/rpf/cache/clear", (RpfService service) =>
+{
+    int cleared = service.ClearCache();
+    return Results.Ok(new { success = true, evictedCount = cleared });
+});
+
+app.MapPost("/api/rpf/close", (CloseRpfRequest req, RpfService service) =>
+{
+    bool closed = service.CloseRpf(req.FilePath);
+    return Results.Ok(new { success = closed, filePath = req.FilePath });
+});
+
+app.MapPost("/api/rpf/extract-folder", (ExtractFolderRequest req, RpfService service) =>
+{
+    try
+    {
+        if (req.AsZip == true)
+        {
+            byte[] zipData = service.ExtractFolderToZip(req.RpfPath, req.FolderPath, req.Recursive ?? true);
+            string folderName = Path.GetFileName(req.FolderPath.TrimEnd('/', '\\'));
+            if (string.IsNullOrEmpty(folderName)) folderName = "archive_folder";
+            return Results.File(zipData, "application/zip", fileDownloadName: $"{folderName}.zip");
+        }
+        else
+        {
+            string outDir = string.IsNullOrWhiteSpace(req.OutputDirectory)
+                ? Path.Combine(Environment.CurrentDirectory, "Export", Path.GetFileName(req.FolderPath.TrimEnd('/', '\\')))
+                : req.OutputDirectory;
+            var result = service.ExtractFolderToDisk(req.RpfPath, req.FolderPath, outDir, req.Recursive ?? true);
+            return Results.Ok(result);
+        }
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapPost("/api/rpf/extract-batch", (ExtractBatchRequest req, RpfService service) =>
+{
+    try
+    {
+        if (req.AsZip == true)
+        {
+            byte[] zipData = service.ExtractBatchToZip(req.RpfPath, req.EntryPaths);
+            return Results.File(zipData, "application/zip", fileDownloadName: "batch_export.zip");
+        }
+        else
+        {
+            string outDir = string.IsNullOrWhiteSpace(req.OutputDirectory)
+                ? Path.Combine(Environment.CurrentDirectory, "Export", "Batch")
+                : req.OutputDirectory;
+            var result = service.ExtractBatchToDisk(req.RpfPath, req.EntryPaths, outDir);
+            return Results.Ok(result);
+        }
     }
     catch (Exception ex)
     {
@@ -535,6 +604,84 @@ app.MapGet("/api/file/read-bytes", (string filePath, long? offset, int? length) 
             Length: buffer.Length,
             Base64Data: base64
         ));
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+// ==========================================
+// 6. Diagnostics & System Metrics
+// ==========================================
+app.MapGet("/api/system/metrics", (SystemService systemService) =>
+{
+    return Results.Ok(systemService.GetMetrics());
+});
+
+// ==========================================
+// 7. GXT2 & GTA V Text Table Endpoints
+// ==========================================
+app.MapGet("/api/text/gxt2", (string rpfPath, string entryPath, RpfService rpfService, TextService textService) =>
+{
+    try
+    {
+        var table = textService.GetGxt2FromRpf(rpfService, rpfPath, entryPath);
+        return Results.Ok(table);
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapGet("/api/text/gxt2/search", (string rpfPath, string entryPath, string q, int? limit, RpfService rpfService, TextService textService) =>
+{
+    try
+    {
+        var table = textService.GetGxt2FromRpf(rpfService, rpfPath, entryPath);
+        var matches = textService.SearchGxt2(table, q, limit ?? 100);
+        return Results.Ok(matches);
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapGet("/api/text/search-rpf", (string rpfPath, string q, int? limit, RpfService rpfService, TextService textService) =>
+{
+    try
+    {
+        var matches = textService.SearchRpfGxt2(rpfService, rpfPath, q, limit ?? 250);
+        return Results.Ok(matches);
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapPost("/api/text/gxt2/export-text", (Gxt2ExportRequest req, TextService textService) =>
+{
+    try
+    {
+        string text = textService.ExportToText(req.Entries);
+        return Results.Ok(new { text });
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapPost("/api/text/gxt2/build", (Gxt2BuildRequest req, TextService textService) =>
+{
+    try
+    {
+        byte[] gxt2Bytes = textService.BuildGxt2(req.TextContent, req.EntryName ?? "text.gxt2");
+        string dlName = req.EntryName ?? "text.gxt2";
+        return Results.File(gxt2Bytes, "application/octet-stream", fileDownloadName: dlName);
     }
     catch (Exception ex)
     {

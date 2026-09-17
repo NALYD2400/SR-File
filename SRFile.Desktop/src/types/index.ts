@@ -210,3 +210,81 @@ export type ActiveView =
   | "crypto"
   | "project_editor"
   | "settings";
+
+export interface RpfCacheItem {
+  name: string;
+  filePath: string;
+  fileSize: number;
+  entryCount: number;
+}
+
+export interface RpfCacheStats {
+  loadedRpfsCount: number;
+  totalIndexedEntries: number;
+  cacheHits: number;
+  cacheMisses: number;
+  hitRatePercent: number;
+  openArchives: RpfCacheItem[];
+}
+
+export interface BatchExtractResult {
+  success: boolean;
+  extractedCount: number;
+  errorCount: number;
+  totalBytes: number;
+  durationMs: number;
+  outputDirectory: string | null;
+  errors: string[];
+}
+
+export interface SystemMetrics {
+  processWorkingSetBytes: number;
+  processWorkingSetMB: number;
+  processPrivateMemoryBytes: number;
+  processPrivateMemoryMB: number;
+  processVirtualMemoryBytes: number;
+  gcTotalMemoryBytes: number;
+  gcTotalMemoryMB: number;
+  gcGen0Collections: number;
+  gcGen1Collections: number;
+  gcGen2Collections: number;
+  heapSizeBytes: number;
+  processId: number;
+  threadCount: number;
+  handleCount: number;
+  uptimeSeconds: number;
+  startTime: string;
+  processorCount: number;
+  osPlatform: string;
+  osArchitecture: string;
+  processArchitecture: string;
+  frameworkDescription: string;
+  openArchivesCount: number;
+  openArchives: RpfCacheItem[];
+  totalIndexedEntries: number;
+  cacheHits: number;
+  cacheMisses: number;
+}
+
+export interface Gxt2Entry {
+  hash: number;
+  hexHash: string;
+  text: string;
+  resolvedKey: string | null;
+}
+
+export interface Gxt2Table {
+  fileName: string;
+  entryCount: number;
+  entries: Gxt2Entry[];
+}
+
+export interface Gxt2SearchResult {
+  rpfPath: string;
+  entryPath: string;
+  hash: number;
+  hexHash: string;
+  text: string;
+  resolvedKey: string | null;
+}
+

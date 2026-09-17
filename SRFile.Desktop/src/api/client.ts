@@ -18,6 +18,12 @@ import {
   Archetype,
   ReadFileTextResult,
   ReadFileBytesResult,
+  RpfCacheStats,
+  BatchExtractResult,
+  SystemMetrics,
+  Gxt2Entry,
+  Gxt2Table,
+  Gxt2SearchResult,
 } from "../types";
 
 let cachedBaseUrl = "http://127.0.0.1:5890";
@@ -316,6 +322,86 @@ export const api = {
   async readFileBytes(filePath: string, offset = 0, length = 65536): Promise<ReadFileBytesResult> {
     const params = new URLSearchParams({ filePath, offset: offset.toString(), length: length.toString() });
     return fetchSidecar<ReadFileBytesResult>(`/api/file/read-bytes?${params.toString()}`);
+  },
+
+  // 6. Cache & Batch Extraction API
+  async getCacheStats(): Promise<RpfCacheStats> {
+    return fetchSidecar<RpfCacheStats>("/api/rpf/cache/stats");
+  },
+
+  async clearCache(): Promise<{ success: boolean; evictedCount: number }> {
+    return fetchSidecar("/api/rpf/cache/clear", { method: "POST" });
+  },
+
+  async closeRpf(filePath: string): Promise<{ success: boolean; filePath: string }> {
+    return fetchSidecar("/api/rpf/close", {
+      method: "POST",
+      body: JSON.stringify({ filePath }),
+    });
+  },
+
+  async extractFolder(
+    rpfPath: string,
+    folderPath: string,
+    outputDirectory?: string,
+    asZip = false,
+    recursive = true
+  ): Promise<BatchExtractResult> {
+    return fetchSidecar<BatchExtractResult>("/api/rpf/extract-folder", {
+      method: "POST",
+      body: JSON.stringify({ rpfPath, folderPath, outputDirectory, asZip, recursive }),
+    });
+  },
+
+  async extractBatch(
+    rpfPath: string,
+    entryPaths: string[],
+    outputDirectory?: string,
+    asZip = false
+  ): Promise<BatchExtractResult> {
+    return fetchSidecar<BatchExtractResult>("/api/rpf/extract-batch", {
+      method: "POST",
+      body: JSON.stringify({ rpfPath, entryPaths, outputDirectory, asZip }),
+    });
+  },
+
+  // 7. Diagnostics & System Metrics API
+  async getSystemMetrics(): Promise<SystemMetrics> {
+    return fetchSidecar<SystemMetrics>("/api/system/metrics");
+  },
+
+  // 8. Text & GXT2 API
+  async getGxt2(rpfPath: string, entryPath: string): Promise<Gxt2Table> {
+    const params = new URLSearchParams({ rpfPath, entryPath });
+    return fetchSidecar<Gxt2Table>(`/api/text/gxt2?${params.toString()}`);
+  },
+
+  async searchGxt2(rpfPath: string, entryPath: string, q: string, limit = 100): Promise<Gxt2Entry[]> {
+    const params = new URLSearchParams({ rpfPath, entryPath, q, limit: limit.toString() });
+    return fetchSidecar<Gxt2Entry[]>(`/api/text/gxt2/search?${params.toString()}`);
+  },
+
+  async searchRpfGxt2(rpfPath: string, q: string, limit = 250): Promise<Gxt2SearchResult[]> {
+    const params = new URLSearchParams({ rpfPath, q, limit: limit.toString() });
+    return fetchSidecar<Gxt2SearchResult[]>(`/api/text/search-rpf?${params.toString()}`);
+  },
+
+  async exportGxt2Text(entries: Gxt2Entry[], fileName?: string): Promise<{ text: string }> {
+    return fetchSidecar("/api/text/gxt2/export-text", {
+      method: "POST",
+      body: JSON.stringify({ entries, fileName }),
+    });
+  },
+
+  async buildGxt2(textContent: string, entryName = "text.gxt2"): Promise<Blob> {
+    const base = await getBaseUrl();
+    const res = await fetch(`${base}/api/text/gxt2/build`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ textContent, entryName }),
+    });
+    if (!res.ok) throw new Error("Failed to build GXT2 binary");
+    return res.blob();
   },
 
   // Native Tauri Dialogs

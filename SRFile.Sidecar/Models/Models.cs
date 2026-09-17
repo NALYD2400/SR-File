@@ -271,4 +271,123 @@ namespace SRFile.Sidecar.Models
     public record ImportYmapXmlRequest(
         string XmlContent
     );
+
+    // ==========================================
+    // 5. Cache & Batch Extraction Models
+    // ==========================================
+    public record RpfCacheItemDto(
+        string Name,
+        string FilePath,
+        long FileSize,
+        uint EntryCount
+    );
+
+    public record RpfCacheStats(
+        int LoadedRpfsCount,
+        long TotalIndexedEntries,
+        long CacheHits,
+        long CacheMisses,
+        double HitRatePercent,
+        List<RpfCacheItemDto> OpenArchives
+    );
+
+    public record ExtractFolderRequest(
+        string RpfPath,
+        string FolderPath,
+        string? OutputDirectory,
+        bool? AsZip,
+        bool? Recursive
+    );
+
+    public record ExtractBatchRequest(
+        string RpfPath,
+        List<string> EntryPaths,
+        string? OutputDirectory,
+        bool? AsZip
+    );
+
+    public record BatchExtractResultDto(
+        bool Success,
+        int ExtractedCount,
+        int ErrorCount,
+        long TotalBytes,
+        long DurationMs,
+        string? OutputDirectory,
+        List<string> Errors
+    );
+
+    public record CloseRpfRequest(
+        string FilePath
+    );
+
+    // ==========================================
+    // 6. Diagnostics & System Metrics Models
+    // ==========================================
+    public record SystemMetricsDto(
+        // Memory
+        long ProcessWorkingSetBytes,
+        double ProcessWorkingSetMB,
+        long ProcessPrivateMemoryBytes,
+        double ProcessPrivateMemoryMB,
+        long ProcessVirtualMemoryBytes,
+        long GcTotalMemoryBytes,
+        double GcTotalMemoryMB,
+        int GcGen0Collections,
+        int GcGen1Collections,
+        int GcGen2Collections,
+        long HeapSizeBytes,
+        // System & Process
+        int ProcessId,
+        int ThreadCount,
+        int HandleCount,
+        long UptimeSeconds,
+        DateTime StartTime,
+        int ProcessorCount,
+        string OsPlatform,
+        string OsArchitecture,
+        string ProcessArchitecture,
+        string FrameworkDescription,
+        // Archive Cache
+        int OpenArchivesCount,
+        List<RpfCacheItemDto> OpenArchives,
+        long TotalIndexedEntries,
+        long CacheHits,
+        long CacheMisses
+    );
+
+    // ==========================================
+    // 7. GXT2 & Text Search Models
+    // ==========================================
+    public record Gxt2EntryDto(
+        uint Hash,
+        string HexHash,
+        string Text,
+        string? ResolvedKey
+    );
+
+    public record Gxt2TableDto(
+        string FileName,
+        uint EntryCount,
+        List<Gxt2EntryDto> Entries
+    );
+
+    public record Gxt2SearchResultDto(
+        string RpfPath,
+        string EntryPath,
+        uint Hash,
+        string HexHash,
+        string Text,
+        string? ResolvedKey
+    );
+
+    public record Gxt2ExportRequest(
+        string? FileName,
+        List<Gxt2EntryDto> Entries
+    );
+
+    public record Gxt2BuildRequest(
+        string TextContent,
+        string? EntryName
+    );
 }
+
