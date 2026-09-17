@@ -88,6 +88,30 @@ namespace CodeWalker
 
         Entity camEntity = new Entity();
         PedEntity pedEntity = new PedEntity();
+        Ped playerPed = null;
+        Weapon playerWeapon = null;
+        Vehicle activeVehicle = null;
+        Entity carCameraEntity = new Entity();
+        YcdFile genericAnimsYcd = null;
+        ClipMapEntry pedIdleClip = null;
+        ClipMapEntry pedWalkClip = null;
+        ClipMapEntry pedRunClip = null;
+        float playerPedHeading = 0.0f;
+        float vehicleSpeed = 0.0f;
+        float vehicleHeading = 0.0f;
+        Vector3 vehicleGroundOffset = Vector3.Zero;
+        volatile bool isSpawningPed = false;
+        volatile bool isSpawningVehicle = false;
+        volatile bool isSpawningWeapon = false;
+
+        class TracerLine
+        {
+            public Vector3 Start;
+            public Vector3 End;
+            public float TimeRemaining;
+        }
+        List<TracerLine> activeTracers = new List<TracerLine>();
+        object tracerSyncRoot = new object();
 
 
         bool iseditmode = false;
@@ -416,6 +440,7 @@ namespace CodeWalker
             camEntity.Orientation = Quaternion.LookAtLH(Vector3.Zero, Vector3.Up, Vector3.ForwardLH);
 
             space.AddPersistentEntity(pedEntity);
+            space.AddPersistentEntity(carCameraEntity);
 
 
             LoadSettings();
@@ -560,6 +585,18 @@ namespace CodeWalker
 
             Input.Update();
 
+            lock (tracerSyncRoot)
+            {
+                for (int i = activeTracers.Count - 1; i >= 0; i--)
+                {
+                    activeTracers[i].TimeRemaining -= elapsed;
+                    if (activeTracers[i].TimeRemaining <= 0)
+                    {
+                        activeTracers.RemoveAt(i);
+                    }
+                }
+            }
+
             if (Input.xbenable)
             {
                 if (Input.ControllerButtonJustPressed(GamepadButtonFlags.Start))
@@ -691,32 +728,35 @@ namespace CodeWalker
                 movecontrol.Y = Math.Min(movecontrol.Y, 1.0f);
                 movecontrol.Y = Math.Max(movecontrol.Y, -1.0f);
 
-                Vector3 fwd = camera.ViewDirection;
-                Vector3 fwdxy = Vector3.Normalize(new Vector3(fwd.X, fwd.Y, 0));
-                Vector3 lftxy = Vector3.Normalize(Vector3.Cross(fwd, Vector3.UnitZ));
-                Vector3 move = lftxy * movecontrol.X + fwdxy * movecontrol.Y;
-                Vector2 movexy = new Vector2(move.X, move.Y);
-
-                movexy *= (1.0f + (Math.Min(Math.Max(Input.xblt, 0.0f), 1.0f) * 15.0f)); //boost with left trigger
-
-                pedEntity.ControlMovement = movexy;
-                pedEntity.ControlJump = Input.kbjump || Input.ControllerButtonPressed(GamepadButtonFlags.X);
-                pedEntity.ControlBoost = Input.ShiftPressed || Input.ControllerButtonPressed(GamepadButtonFlags.A | GamepadButtonFlags.RightShoulder | GamepadButtonFlags.LeftShoulder);
-
-
-                //Vector3 pedfwd = pedEntity.Orientation.Multiply(Vector3.UnitZ);
-
-
-
-
-
-
-                bool fire = mlb || (Input.xbtrigs.Y > 0);
-                if (fire && !ControlFireToggle)
+                if (ControlMode == WorldControlMode.Car)
                 {
-                    SpawnTestEntity(true);
+                    UpdateVehiclePhysics(elapsed, movecontrol);
                 }
-                ControlFireToggle = fire;
+                else if (ControlMode == WorldControlMode.Ped)
+                {
+                    UpdatePedPhysics(elapsed, movecontrol, mlbjustpressed);
+                }
+                else
+                {
+                    Vector3 fwd = camera.ViewDirection;
+                    Vector3 fwdxy = Vector3.Normalize(new Vector3(fwd.X, fwd.Y, 0));
+                    Vector3 lftxy = Vector3.Normalize(Vector3.Cross(fwd, Vector3.UnitZ));
+                    Vector3 move = lftxy * movecontrol.X + fwdxy * movecontrol.Y;
+                    Vector2 movexy = new Vector2(move.X, move.Y);
+
+                    movexy *= (1.0f + (Math.Min(Math.Max(Input.xblt, 0.0f), 1.0f) * 15.0f)); //boost with left trigger
+
+                    pedEntity.ControlMovement = movexy;
+                    pedEntity.ControlJump = Input.kbjump || Input.ControllerButtonPressed(GamepadButtonFlags.X);
+                    pedEntity.ControlBoost = Input.ShiftPressed || Input.ControllerButtonPressed(GamepadButtonFlags.A | GamepadButtonFlags.RightShoulder | GamepadButtonFlags.LeftShoulder);
+
+                    bool fire = mlb || (Input.xbtrigs.Y > 0);
+                    if (fire && !ControlFireToggle)
+                    {
+                        SpawnTestEntity(true);
+                    }
+                    ControlFireToggle = fire;
+                }
 
 
             }
@@ -815,6 +855,8 @@ namespace CodeWalker
             {
                 RenderWorldAudioZones();
             }
+
+            RenderGameplayEntities();
 
         }
 
@@ -2342,7 +2384,14 @@ namespace CodeWalker
 
             if (isfree && !wasfree)
             {
-                camEntity.Position = pedEntity.Position;
+                if (ControlMode == WorldControlMode.Car && activeVehicle != null)
+                {
+                    camEntity.Position = activeVehicle.Position + new Vector3(0, 0, 1.5f);
+                }
+                else
+                {
+                    camEntity.Position = pedEntity.Position;
+                }
 
                 pedEntity.Enabled = false;
 
@@ -2356,15 +2405,31 @@ namespace CodeWalker
             }
             else if (!isfree && wasfree)
             {
-                pedEntity.Position = camEntity.Position;
-                pedEntity.Velocity = Vector3.Zero;
-                pedEntity.Enabled = true;
+                if (mode == WorldControlMode.Car && activeVehicle != null)
+                {
+                    carCameraEntity.Position = activeVehicle.Position + new Vector3(0, 0, 1.2f);
+                    camera.SetFollowEntity(carCameraEntity);
+                    camera.TargetDistance = 6.0f;
+                    camera.Smoothness = 15.0f;
+                    pedEntity.Enabled = false;
+                }
+                else
+                {
+                    pedEntity.Position = camEntity.Position;
+                    pedEntity.Velocity = Vector3.Zero;
+                    pedEntity.Enabled = true;
+
+                    camera.SetFollowEntity(pedEntity.CameraEntity);
+                    camera.TargetDistance = 3.5f; // 3rd person
+                    camera.Smoothness = 20.0f;
+
+                    if (playerPed == null && !isSpawningPed)
+                    {
+                        Task.Run(() => SpawnPlayerPed("player_zero"));
+                    }
+                }
 
                 Renderer.timerunning = true;
-
-                camera.SetFollowEntity(pedEntity.CameraEntity);
-                camera.TargetDistance = 0.01f; //1cm
-                camera.Smoothness = 20.0f;
 
                 //center the mouse in the window
                 System.Drawing.Point centerp = new System.Drawing.Point(ClientSize.Width / 2, ClientSize.Height / 2);
@@ -2374,12 +2439,445 @@ namespace CodeWalker
                 Cursor.Position = PointToScreen(centerp);
                 Cursor.Hide();
             }
-
-
-
+            else if (mode == WorldControlMode.Car && ControlMode == WorldControlMode.Ped)
+            {
+                if (activeVehicle != null)
+                {
+                    pedEntity.Enabled = false;
+                    carCameraEntity.Position = activeVehicle.Position + new Vector3(0, 0, 1.2f);
+                    camera.SetFollowEntity(carCameraEntity);
+                    camera.TargetDistance = 6.0f;
+                    camera.Smoothness = 15.0f;
+                }
+            }
+            else if (mode == WorldControlMode.Ped && ControlMode == WorldControlMode.Car)
+            {
+                if (activeVehicle != null)
+                {
+                    Vector3 rgt = new Vector3((float)Math.Cos(vehicleHeading), (float)Math.Sin(vehicleHeading), 0.0f);
+                    pedEntity.Position = activeVehicle.Position - rgt * 2.2f + new Vector3(0, 0, 1.7f);
+                    pedEntity.Velocity = Vector3.Zero;
+                }
+                pedEntity.Enabled = true;
+                camera.SetFollowEntity(pedEntity.CameraEntity);
+                camera.TargetDistance = 3.5f;
+                camera.Smoothness = 20.0f;
+            }
 
             ControlMode = mode;
 
+        }
+
+        private void RenderGameplayEntities()
+        {
+            if (activeVehicle != null)
+            {
+                Renderer.RenderVehicle(activeVehicle);
+            }
+
+            if (playerPed != null && ControlMode != WorldControlMode.Car)
+            {
+                Renderer.RenderPed(playerPed);
+
+                if (playerWeapon != null)
+                {
+                    Renderer.RenderWeapon(playerWeapon);
+                }
+            }
+
+            lock (tracerSyncRoot)
+            {
+                if (activeTracers.Count > 0)
+                {
+                    List<VertexTypePC> lines = new List<VertexTypePC>();
+                    uint tracerCol = 0xFFFF9900; // Bright orange / gold
+                    for (int i = activeTracers.Count - 1; i >= 0; i--)
+                    {
+                        var t = activeTracers[i];
+                        lines.Add(new VertexTypePC { Position = t.Start, Colour = tracerCol });
+                        lines.Add(new VertexTypePC { Position = t.End, Colour = tracerCol });
+                    }
+                    if (lines.Count > 0)
+                    {
+                        Renderer.RenderLines(lines);
+                    }
+                }
+            }
+        }
+
+        private void UpdatePedPhysics(float elapsed, Vector2 movecontrol, bool firePressed)
+        {
+            Vector3 fwd = camera.ViewDirection;
+            Vector3 fwdxy = Vector3.Normalize(new Vector3(fwd.X, fwd.Y, 0));
+            Vector3 lftxy = Vector3.Normalize(Vector3.Cross(fwd, Vector3.UnitZ));
+            Vector3 move = lftxy * movecontrol.X + fwdxy * movecontrol.Y;
+            Vector2 movexy = new Vector2(move.X, move.Y);
+
+            float boost = 1.0f + (Math.Min(Math.Max(Input.xblt, 0.0f), 1.0f) * 15.0f);
+            if (Input.ShiftPressed) boost = 2.2f;
+            movexy *= boost;
+
+            pedEntity.ControlMovement = movexy;
+            pedEntity.ControlJump = Input.kbjump || Input.ControllerButtonPressed(GamepadButtonFlags.X);
+            pedEntity.ControlBoost = Input.ShiftPressed || Input.ControllerButtonPressed(GamepadButtonFlags.A | GamepadButtonFlags.RightShoulder | GamepadButtonFlags.LeftShoulder);
+
+            if (playerPed != null)
+            {
+                playerPed.Position = pedEntity.Position + new Vector3(0, 0, -1.7f);
+
+                float speed = movexy.Length();
+                if (speed > 0.1f && move.LengthSquared() > 0.001f)
+                {
+                    playerPedHeading = (float)Math.Atan2(move.Y, move.X) - (float)(Math.PI / 2.0);
+                }
+                else if (firePressed)
+                {
+                    playerPedHeading = (float)Math.Atan2(fwdxy.Y, fwdxy.X) - (float)(Math.PI / 2.0);
+                }
+                playerPed.Rotation = Quaternion.RotationAxis(Vector3.UnitZ, playerPedHeading);
+
+                if (speed > 4.0f && pedRunClip != null)
+                {
+                    playerPed.AnimClip = pedRunClip;
+                }
+                else if (speed > 0.2f && pedWalkClip != null)
+                {
+                    playerPed.AnimClip = pedWalkClip;
+                }
+                else if (pedIdleClip != null)
+                {
+                    playerPed.AnimClip = pedIdleClip;
+                }
+
+                playerPed.UpdateEntity();
+
+                if (playerWeapon != null)
+                {
+                    Bone rHandBone = null;
+                    if (playerPed.Skeleton?.BonesMap != null && playerPed.Skeleton.BonesMap.TryGetValue((ushort)0x6F06, out rHandBone))
+                    {
+                        Matrix worldMtx = rHandBone.AnimTransform * Matrix.RotationQuaternion(playerPed.Rotation) * Matrix.Translation(playerPed.Position);
+                        playerWeapon.Position = worldMtx.TranslationVector;
+                        playerWeapon.Rotation = Quaternion.RotationMatrix(worldMtx);
+                    }
+                    else
+                    {
+                        Vector3 fwdPed = playerPed.Rotation.Multiply(Vector3.UnitY);
+                        Vector3 rgtPed = playerPed.Rotation.Multiply(Vector3.UnitX);
+                        playerWeapon.Position = playerPed.Position + fwdPed * 0.35f + rgtPed * 0.25f + Vector3.UnitZ * 1.15f;
+                        playerWeapon.Rotation = playerPed.Rotation;
+                    }
+                    playerWeapon.UpdateEntity();
+                }
+            }
+
+            // Anti-clipping camera raycast
+            Vector3 pedHead = pedEntity.Position + new Vector3(0, 0, 0.2f);
+            Vector3 camRel = camera.Position - pedHead;
+            float currentDist = camRel.Length();
+            if (currentDist > 0.1f)
+            {
+                Ray antiClipRay = new Ray(pedHead, camRel / currentDist);
+                var hit = space.RayIntersect(antiClipRay, 3.5f, collisionmeshlayers);
+                if (hit.Hit && hit.HitDist > 0.5f)
+                {
+                    camera.TargetDistance = Math.Max(0.5f, hit.HitDist - 0.25f);
+                }
+                else
+                {
+                    camera.TargetDistance = 3.5f;
+                }
+            }
+
+            if (firePressed)
+            {
+                ShootActiveWeapon();
+            }
+        }
+
+        private void UpdateVehiclePhysics(float elapsed, Vector2 movecontrol)
+        {
+            if (activeVehicle == null) return;
+
+            float throttle = movecontrol.Y;
+            float steer = movecontrol.X;
+
+            float maxSpeed = 45.0f; // ~160 km/h
+            float maxReverse = -12.0f;
+            float accelRate = 22.0f;
+            float brakeRate = 35.0f;
+            float dragRate = 4.0f;
+            float turnRate = 2.2f;
+
+            if (throttle > 0.05f)
+            {
+                vehicleSpeed += throttle * accelRate * elapsed;
+                if (vehicleSpeed > maxSpeed) vehicleSpeed = maxSpeed;
+            }
+            else if (throttle < -0.05f)
+            {
+                vehicleSpeed += throttle * brakeRate * elapsed;
+                if (vehicleSpeed < maxReverse) vehicleSpeed = maxReverse;
+            }
+            else
+            {
+                if (vehicleSpeed > 0)
+                {
+                    vehicleSpeed = Math.Max(0.0f, vehicleSpeed - dragRate * elapsed);
+                }
+                else if (vehicleSpeed < 0)
+                {
+                    vehicleSpeed = Math.Min(0.0f, vehicleSpeed + dragRate * elapsed);
+                }
+            }
+
+            float speedFactor = Math.Min(1.0f, Math.Abs(vehicleSpeed) / 5.0f);
+            if (Math.Abs(vehicleSpeed) > 0.1f)
+            {
+                float dir = (vehicleSpeed >= 0) ? 1.0f : -1.0f;
+                vehicleHeading -= steer * turnRate * speedFactor * dir * elapsed;
+            }
+
+            Vector3 fwd = new Vector3(-(float)Math.Sin(vehicleHeading), (float)Math.Cos(vehicleHeading), 0.0f);
+            Vector3 rgt = new Vector3((float)Math.Cos(vehicleHeading), (float)Math.Sin(vehicleHeading), 0.0f);
+
+            Vector3 nextPos = activeVehicle.Position + fwd * vehicleSpeed * elapsed;
+
+            float halfLength = 2.2f;
+            float halfWidth = 1.0f;
+            Vector3[] wheelOffsets = new Vector3[]
+            {
+                fwd * halfLength + rgt * halfWidth,
+                fwd * halfLength - rgt * halfWidth,
+                -fwd * halfLength + rgt * halfWidth,
+                -fwd * halfLength - rgt * halfWidth
+            };
+
+            float sumZ = 0.0f;
+            int hitCount = 0;
+            Vector3 sumNormal = Vector3.Zero;
+
+            for (int i = 0; i < 4; i++)
+            {
+                Vector3 rayStart = nextPos + wheelOffsets[i] + Vector3.UnitZ * 2.0f;
+                Ray ray = new Ray(rayStart, -Vector3.UnitZ);
+                var hit = space.RayIntersect(ray, 6.0f, collisionmeshlayers);
+                if (hit.Hit)
+                {
+                    sumZ += hit.Position.Z;
+                    sumNormal += hit.Normal;
+                    hitCount++;
+                }
+            }
+
+            float groundZ = nextPos.Z;
+            Vector3 upVec = Vector3.UnitZ;
+            if (hitCount > 0)
+            {
+                groundZ = (sumZ / hitCount) + vehicleGroundOffset.Z;
+                upVec = Vector3.Normalize(sumNormal / hitCount);
+            }
+
+            nextPos.Z = nextPos.Z + (groundZ - nextPos.Z) * Math.Min(1.0f, 15.0f * elapsed);
+
+            Quaternion yawRot = Quaternion.RotationAxis(Vector3.UnitZ, vehicleHeading);
+            float pitch = -Vector3.Dot(upVec, fwd) * 0.6f;
+            float roll = Vector3.Dot(upVec, rgt) * 0.6f;
+            Quaternion tiltRot = Quaternion.RotationAxis(Vector3.UnitX, pitch) * Quaternion.RotationAxis(Vector3.UnitY, roll);
+
+            activeVehicle.Position = nextPos;
+            activeVehicle.Rotation = Quaternion.Multiply(yawRot, tiltRot);
+            activeVehicle.UpdateEntity();
+
+            carCameraEntity.Position = activeVehicle.Position + new Vector3(0, 0, 1.4f);
+        }
+
+        private void ShootActiveWeapon()
+        {
+            Ray ray = new Ray(camera.Position, camera.ViewDirection);
+            var hit = space.RayIntersect(ray, 1000.0f, collisionmeshlayers);
+
+            Vector3 startPos = playerWeapon != null ? playerWeapon.Position : camera.Position;
+            Vector3 targetPos = hit.Hit ? hit.Position : (camera.Position + camera.ViewDirection * 200.0f);
+
+            AddTracerLine(startPos, targetPos);
+        }
+
+        private void AddTracerLine(Vector3 start, Vector3 end)
+        {
+            lock (tracerSyncRoot)
+            {
+                activeTracers.Add(new TracerLine { Start = start, End = end, TimeRemaining = 0.25f });
+            }
+        }
+
+        private void ToggleVehicleEnterExit()
+        {
+            if (ControlMode == WorldControlMode.Car)
+            {
+                SetControlMode(WorldControlMode.Ped);
+            }
+            else if (ControlMode == WorldControlMode.Ped)
+            {
+                if (activeVehicle != null)
+                {
+                    float dist = (activeVehicle.Position - pedEntity.Position).Length();
+                    if (dist < 6.0f)
+                    {
+                        SetControlMode(WorldControlMode.Car);
+                    }
+                }
+            }
+        }
+
+        private void LoadGenericLocomotionAnims()
+        {
+            try
+            {
+                var ycdhash = JenkHash.GenHash("move_m@generic");
+                var ycd = gameFileCache.GetYcd(ycdhash);
+                int retries = 0;
+                while ((ycd != null) && (!ycd.Loaded) && retries < 200)
+                {
+                    Thread.Sleep(10);
+                    ycd = gameFileCache.GetYcd(ycdhash);
+                    retries++;
+                }
+                if (ycd?.ClipMap != null)
+                {
+                    genericAnimsYcd = ycd;
+                    ClipMapEntry cme;
+                    if (ycd.ClipMap.TryGetValue(JenkHash.GenHash("idle"), out cme)) pedIdleClip = cme;
+                    if (ycd.ClipMap.TryGetValue(JenkHash.GenHash("walk"), out cme)) pedWalkClip = cme;
+                    if (ycd.ClipMap.TryGetValue(JenkHash.GenHash("run"), out cme)) pedRunClip = cme;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("Error loading generic anims: " + ex.Message);
+            }
+        }
+
+        public void SpawnPlayerPed(string pedName)
+        {
+            if (isSpawningPed) return;
+            isSpawningPed = true;
+            try
+            {
+                if (genericAnimsYcd == null)
+                {
+                    LoadGenericLocomotionAnims();
+                }
+
+                Ped newPed = new Ped();
+                newPed.Init(pedName, gameFileCache);
+                newPed.LoadDefaultComponents(gameFileCache);
+                newPed.Position = pedEntity.Position + new Vector3(0, 0, -1.7f);
+                newPed.Rotation = Quaternion.RotationAxis(Vector3.UnitZ, playerPedHeading);
+                newPed.UpdateEntity();
+
+                if (newPed.AnimClip == null && pedIdleClip != null)
+                {
+                    newPed.AnimClip = pedIdleClip;
+                }
+
+                lock (Renderer.RenderSyncRoot)
+                {
+                    playerPed = newPed;
+                }
+
+                if (playerWeapon != null)
+                {
+                    GivePlayerWeapon(playerWeapon.Name);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("Error spawning ped: " + ex.Message);
+            }
+            finally
+            {
+                isSpawningPed = false;
+            }
+        }
+
+        public void GivePlayerWeapon(string weaponName)
+        {
+            if (isSpawningWeapon) return;
+            isSpawningWeapon = true;
+            try
+            {
+                Weapon newWp = new Weapon();
+                newWp.Init(weaponName, gameFileCache, true);
+                lock (Renderer.RenderSyncRoot)
+                {
+                    playerWeapon = newWp;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("Error equipping weapon: " + ex.Message);
+            }
+            finally
+            {
+                isSpawningWeapon = false;
+            }
+        }
+
+        public void SpawnActiveVehicle(string vehicleName, bool enterImmediately = true)
+        {
+            if (isSpawningVehicle) return;
+            isSpawningVehicle = true;
+            try
+            {
+                Vehicle newVeh = new Vehicle();
+                newVeh.Init(vehicleName, gameFileCache, true);
+
+                float minZ = -0.5f;
+                if (newVeh.Yft?.Fragment?.Drawable != null)
+                {
+                    minZ = newVeh.Yft.Fragment.Drawable.BoundingBoxMin.Z;
+                }
+                vehicleGroundOffset = new Vector3(0, 0, -minZ);
+
+                Vector3 spawnPos = (ControlMode == WorldControlMode.Ped) ? pedEntity.Position : camEntity.Position;
+                Vector3 fwd = camera.ViewDirection;
+                Vector3 fwdxy = Vector3.Normalize(new Vector3(fwd.X, fwd.Y, 0));
+                if (enterImmediately)
+                {
+                    newVeh.Position = spawnPos + new Vector3(0, 0, -1.7f + vehicleGroundOffset.Z);
+                }
+                else
+                {
+                    newVeh.Position = spawnPos + fwdxy * 4.0f + new Vector3(0, 0, -1.7f + vehicleGroundOffset.Z);
+                }
+
+                vehicleHeading = (float)Math.Atan2(fwdxy.Y, fwdxy.X) - (float)(Math.PI / 2.0);
+                newVeh.Rotation = Quaternion.RotationAxis(Vector3.UnitZ, vehicleHeading);
+                newVeh.UpdateEntity();
+
+                vehicleSpeed = 0.0f;
+
+                lock (Renderer.RenderSyncRoot)
+                {
+                    activeVehicle = newVeh;
+                }
+
+                if (enterImmediately)
+                {
+                    this.BeginInvoke(new Action(() => {
+                        SetControlMode(WorldControlMode.Car);
+                    }));
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("Error spawning vehicle: " + ex.Message);
+            }
+            finally
+            {
+                isSpawningVehicle = false;
+            }
         }
 
 
@@ -6201,7 +6699,15 @@ namespace CodeWalker
                     float cz = camera.Position.Z;
                     int fps = Renderer.CurrentFPS;
                     long drawn = Renderer.RenderedGeometries;
-                    string msg = $"{{\"type\":\"tick\",\"camX\":{cx.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"camY\":{cy.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"camZ\":{cz.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"fps\":{fps},\"drawn\":{drawn}}}";
+
+                    float speedKmh = (ControlMode == WorldControlMode.Car) ? Math.Abs(vehicleSpeed) * 3.6f :
+                                     (ControlMode == WorldControlMode.Ped) ? pedEntity.Velocity.Length() * 3.6f : 0.0f;
+                    string modeStr = ControlMode.ToString();
+                    string pedStr = playerPed != null ? playerPed.Name : "Michael";
+                    string wpStr = playerWeapon != null ? playerWeapon.Name : "Aucune";
+                    string vehStr = activeVehicle != null ? activeVehicle.Name : "Aucun";
+
+                    string msg = $"{{\"type\":\"tick\",\"camX\":{cx.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"camY\":{cy.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"camZ\":{cz.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"fps\":{fps},\"drawn\":{drawn},\"speed\":{speedKmh.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)},\"mode\":\"{modeStr}\",\"ped\":\"{pedStr}\",\"weapon\":\"{wpStr}\",\"vehicle\":\"{vehStr}\"}}";
                     webViewTools.CoreWebView2.PostWebMessageAsJson(msg);
                 }
                 catch { }
@@ -6604,6 +7110,10 @@ namespace CodeWalker
                     if (k == kb.FirstPerson)
                     {
                         SetControlMode((ControlMode == WorldControlMode.Free) ? WorldControlMode.Ped : WorldControlMode.Free);
+                    }
+                    if (k == Keys.F && ControlMode != WorldControlMode.Free)
+                    {
+                        ToggleVehicleEnterExit();
                     }
                     if (k == Keys.Delete)
                     {
@@ -8602,6 +9112,75 @@ namespace CodeWalker
                             {
                                 GoToPosition(Widget.Position);
                             }
+                        }
+                    }));
+                }
+                else if (json.Contains("\"toggle_ped_mode\""))
+                {
+                    this.BeginInvoke(new Action(() => {
+                        SetControlMode((ControlMode == WorldControlMode.Free) ? WorldControlMode.Ped : WorldControlMode.Free);
+                    }));
+                }
+                else if (json.Contains("\"set_camera_distance\""))
+                {
+                    var match = System.Text.RegularExpressions.Regex.Match(json, "\"value\":\\s*([0-9.]+)");
+                    if (match.Success && float.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float dist))
+                    {
+                        camera.TargetDistance = dist;
+                    }
+                }
+                else if (json.Contains("\"spawn_ped\""))
+                {
+                    var match = System.Text.RegularExpressions.Regex.Match(json, "\"model\":\\s*\"([^\"]+)\"");
+                    if (match.Success)
+                    {
+                        string model = match.Groups[1].Value.Trim();
+                        Task.Run(() => SpawnPlayerPed(model));
+                    }
+                }
+                else if (json.Contains("\"give_weapon\""))
+                {
+                    var match = System.Text.RegularExpressions.Regex.Match(json, "\"weapon\":\\s*\"([^\"]+)\"");
+                    if (match.Success)
+                    {
+                        string wp = match.Groups[1].Value.Trim();
+                        Task.Run(() => GivePlayerWeapon(wp));
+                    }
+                }
+                else if (json.Contains("\"remove_weapon\""))
+                {
+                    lock (Renderer.RenderSyncRoot)
+                    {
+                        playerWeapon = null;
+                    }
+                }
+                else if (json.Contains("\"spawn_vehicle\""))
+                {
+                    var match = System.Text.RegularExpressions.Regex.Match(json, "\"model\":\\s*\"([^\"]+)\"");
+                    bool enter = json.Contains("\"enter\":true");
+                    if (match.Success)
+                    {
+                        string model = match.Groups[1].Value.Trim();
+                        Task.Run(() => SpawnActiveVehicle(model, enter));
+                    }
+                }
+                else if (json.Contains("\"toggle_vehicle\""))
+                {
+                    this.BeginInvoke(new Action(() => {
+                        ToggleVehicleEnterExit();
+                    }));
+                }
+                else if (json.Contains("\"delete_vehicle\""))
+                {
+                    this.BeginInvoke(new Action(() => {
+                        if (ControlMode == WorldControlMode.Car)
+                        {
+                            SetControlMode(WorldControlMode.Ped);
+                        }
+                        lock (Renderer.RenderSyncRoot)
+                        {
+                            activeVehicle = null;
+                            vehicleSpeed = 0;
                         }
                     }));
                 }

@@ -138,7 +138,7 @@
     /* Tabs Bar */
     .tabs-bar {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       background: var(--surface);
       border-bottom: 1px solid var(--border);
       padding: 4px;
@@ -528,6 +528,10 @@
       <span class="icon">⚙</span>
       <span class="tab-label">Rendu</span>
     </button>
+    <button class="tab-btn" onclick="setTab('gameplay', this)">
+      <span class="icon">🎮</span>
+      <span class="tab-label">Joueur</span>
+    </button>
   </nav>
 
   <main>
@@ -821,6 +825,108 @@
         </div>
       </div>
     </div>
+
+    <!-- TAB 5: JOUEUR & VÉHICULES -->
+    <div id="tab-gameplay" class="tab-content">
+      <!-- Section Mode & Caméra -->
+      <div class="card">
+        <div class="card-title">
+          <span>Mode Jeu & Caméra 3ème Personne</span>
+          <span class="badge" id="lblControlMode" style="background: rgba(255, 122, 41, 0.2); color: var(--accent);">Free</span>
+        </div>
+        <button class="btn-accent" onclick="send('toggle_ped_mode')">
+          <span>🚶 Activer / Désactiver Mode Joueur (F8)</span>
+        </button>
+        <div class="slider-group" style="margin-top: 4px;">
+          <div class="slider-header">
+            <span>Distance Caméra TPS</span>
+            <span class="slider-val" id="valCamDist">3.5m</span>
+          </div>
+          <input type="range" id="rngCamDist" min="10" max="80" value="35" oninput="updateCamDist(this.value)" />
+        </div>
+        <div style="font-size: 11px; color: var(--subtext); line-height: 1.4;">
+          💡 <b>Touches :</b> ZQSD/WASD pour marcher/courir, Shift pour sprinter, Espace pour sauter, Clic gauche pour tirer, <b>F</b> pour monter/descendre d'un véhicule.
+        </div>
+      </div>
+
+      <!-- Section Avatar / Ped -->
+      <div class="card">
+        <div class="card-title">
+          <span>Personnage (Avatar Ped)</span>
+          <span class="badge" id="lblActivePed" style="background: rgba(46, 204, 113, 0.2); color: #2ecc71;">Michael</span>
+        </div>
+        <div class="poi-grid">
+          <button class="poi-btn" onclick="spawnPed('player_zero')">👤 Michael</button>
+          <button class="poi-btn" onclick="spawnPed('player_one')">👤 Franklin</button>
+          <button class="poi-btn" onclick="spawnPed('player_two')">👤 Trevor</button>
+          <button class="poi-btn" onclick="spawnPed('s_m_y_cop_01')">👮 Policier</button>
+          <button class="poi-btn" onclick="spawnPed('s_m_m_fibsec_01')">🕵️ Agent FIB</button>
+          <button class="poi-btn" onclick="spawnPed('s_m_y_swat_01')">🛡️ SWAT</button>
+          <button class="poi-btn" onclick="spawnPed('u_m_y_zombie_01')">🧟 Zombie</button>
+          <button class="poi-btn" onclick="spawnPed('s_m_m_movalien_01')">👽 Alien</button>
+        </div>
+        <div style="display: flex; gap: 6px; margin-top: 4px;">
+          <input type="text" id="txtCustomPed" placeholder="Modèle ped (ex: ig_lestercrest)" style="flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; color: var(--text); font-size: 11px;" />
+          <button class="btn-action" onclick="spawnCustomPed()" style="padding: 6px 10px;">Spawne</button>
+        </div>
+      </div>
+
+      <!-- Section Armes -->
+      <div class="card">
+        <div class="card-title">
+          <span>Arsenal & Armes</span>
+          <span class="badge" id="lblActiveWeapon" style="background: rgba(52, 152, 219, 0.2); color: #3498db;">Aucune</span>
+        </div>
+        <div class="poi-grid">
+          <button class="poi-btn" onclick="giveWeapon('w_pi_combatpistol')">🔫 Combat Pistol</button>
+          <button class="poi-btn" onclick="giveWeapon('w_ar_assaultrifle')">💥 Assault Rifle</button>
+          <button class="poi-btn" onclick="giveWeapon('w_ar_carbinerifle')">⚡ Carabine</button>
+          <button class="poi-btn" onclick="giveWeapon('w_sg_pumpshotgun')">🛑 Shotgun</button>
+          <button class="poi-btn" onclick="giveWeapon('w_sr_sniperrifle')">🎯 Sniper</button>
+          <button class="poi-btn" onclick="giveWeapon('w_lr_rpg')">🚀 Lance-roquettes</button>
+        </div>
+        <div style="display: flex; gap: 6px; margin-top: 4px;">
+          <input type="text" id="txtCustomWeapon" placeholder="Nom arme (ex: w_sb_microsmg)" style="flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; color: var(--text); font-size: 11px;" />
+          <button class="btn-action" onclick="giveCustomWeapon()" style="padding: 6px 10px;">Équiper</button>
+          <button class="btn-action" onclick="send('remove_weapon')" style="color: #e74c3c; border-color: rgba(231,76,60,0.4); padding: 6px 10px;">Désarmer</button>
+        </div>
+      </div>
+
+      <!-- Section Véhicules -->
+      <div class="card">
+        <div class="card-title">
+          <span>Véhicules & Conduite</span>
+          <span class="badge" id="lblActiveVehicle" style="background: rgba(155, 89, 182, 0.2); color: #9b59b6;">Aucun</span>
+        </div>
+        <div class="poi-grid">
+          <button class="poi-btn" onclick="spawnVehicle('adder', true)">🏎️ Adder</button>
+          <button class="poi-btn" onclick="spawnVehicle('zentorno', true)">⚡ Zentorno</button>
+          <button class="poi-btn" onclick="spawnVehicle('sultanrs', true)">🚗 Sultan RS</button>
+          <button class="poi-btn" onclick="spawnVehicle('police', true)">🚓 Police</button>
+          <button class="poi-btn" onclick="spawnVehicle('bati', true)">🏍️ Bati 801</button>
+          <button class="poi-btn" onclick="spawnVehicle('buzzard', true)">🚁 Buzzard</button>
+        </div>
+        <div style="display: flex; gap: 6px; margin-top: 4px;">
+          <input type="text" id="txtCustomVeh" placeholder="Modèle véhicule (ex: t20, insurgent)" style="flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; color: var(--text); font-size: 11px;" />
+          <button class="btn-action" onclick="spawnCustomVehicle(true)" style="padding: 6px 10px;">Spawne & Monte</button>
+        </div>
+        <div style="display: flex; gap: 6px; margin-top: 4px;">
+          <button class="btn-action" onclick="send('toggle_vehicle')" style="flex: 1;">🔑 Monter / Descendre (F)</button>
+          <button class="btn-action" onclick="send('delete_vehicle')" style="color: #e74c3c; border-color: rgba(231,76,60,0.4); padding: 6px 10px;">Supprimer</button>
+        </div>
+      </div>
+
+      <!-- Section Télémétrie en Direct -->
+      <div class="card">
+        <div class="card-title">
+          <span>Télémétrie en Direct</span>
+          <span class="slider-val" id="lblSpeed">0.0 km/h</span>
+        </div>
+        <div style="width: 100%; height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; border: 1px solid var(--border);">
+          <div id="barSpeed" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--accent), #ff3b30); transition: width 0.1s ease;"></div>
+        </div>
+      </div>
+    </div>
   </main>
 
   <footer>
@@ -902,6 +1008,36 @@
       setTimeout(() => t.classList.remove('show'), 2000);
     }
 
+    function spawnPed(model) {
+      send('spawn_ped', { model });
+      showToast('Avatar changé : ' + model);
+    }
+    function spawnCustomPed() {
+      const m = document.getElementById('txtCustomPed').value.trim();
+      if (m) spawnPed(m);
+    }
+    function giveWeapon(weapon) {
+      send('give_weapon', { weapon });
+      showToast('Arme équipée : ' + weapon);
+    }
+    function giveCustomWeapon() {
+      const w = document.getElementById('txtCustomWeapon').value.trim();
+      if (w) giveWeapon(w);
+    }
+    function spawnVehicle(model, enter = true) {
+      send('spawn_vehicle', { model, enter });
+      showToast('Véhicule : ' + model);
+    }
+    function spawnCustomVehicle(enter = true) {
+      const v = document.getElementById('txtCustomVeh').value.trim();
+      if (v) spawnVehicle(v, enter);
+    }
+    function updateCamDist(val) {
+      const d = (val * 0.1).toFixed(1);
+      document.getElementById('valCamDist').textContent = d + 'm';
+      send('set_camera_distance', { value: parseFloat(d) });
+    }
+
     // Message handler from C#
     if (window.chrome && window.chrome.webview) {
       window.chrome.webview.addEventListener('message', e => {
@@ -913,6 +1049,31 @@
             if (data.camZ !== undefined) document.getElementById('camZ').textContent = data.camZ.toFixed(1);
             if (data.fps !== undefined) document.getElementById('fpsDisplay').textContent = data.fps;
             if (data.drawn !== undefined) document.getElementById('drawStats').textContent = 'Géométries: ' + data.drawn;
+            if (data.speed !== undefined) {
+              const spd = document.getElementById('lblSpeed');
+              if (spd) spd.textContent = data.speed + ' km/h';
+              const spdBar = document.getElementById('barSpeed');
+              if (spdBar) spdBar.style.width = Math.min(100, (Number(data.speed) / 200) * 100) + '%';
+            }
+            if (data.mode) {
+              const m = document.getElementById('lblControlMode');
+              if (m) {
+                m.textContent = data.mode;
+                m.style.color = (data.mode === 'Ped' || data.mode === 'Car') ? '#2ecc71' : 'var(--accent)';
+              }
+            }
+            if (data.ped) {
+              const p = document.getElementById('lblActivePed');
+              if (p) p.textContent = data.ped;
+            }
+            if (data.weapon) {
+              const w = document.getElementById('lblActiveWeapon');
+              if (w) w.textContent = data.weapon;
+            }
+            if (data.vehicle) {
+              const v = document.getElementById('lblActiveVehicle');
+              if (v) v.textContent = data.vehicle;
+            }
           }
           else if (data.type === 'selection') {
             document.getElementById('selStatusBadge').textContent = data.hasSelection ? 'Actif' : 'Aucun';
