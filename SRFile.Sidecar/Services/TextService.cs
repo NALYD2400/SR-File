@@ -32,6 +32,10 @@ namespace SRFile.Sidecar.Services
                     string? resolved = GlobalText.TryGetString(entry.Hash);
                     if (string.IsNullOrEmpty(resolved) || resolved == entry.Hash.ToString())
                     {
+                        resolved = JenkIndex.TryGetString(entry.Hash);
+                    }
+                    if (string.IsNullOrEmpty(resolved) || resolved == entry.Hash.ToString())
+                    {
                         resolved = null;
                     }
 
@@ -164,7 +168,7 @@ namespace SRFile.Sidecar.Services
         public byte[] BuildGxt2(string textContent, string entryName = "")
         {
             var lines = (textContent ?? string.Empty).Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-            var entries = new List<Gxt2Entry>();
+            var entryMap = new Dictionary<uint, Gxt2Entry>();
 
             foreach (var rawLine in lines)
             {
@@ -203,13 +207,14 @@ namespace SRFile.Sidecar.Services
                     hash = JenkHash.GenHash(keyPart, JenkHashInputEncoding.UTF8);
                 }
 
-                entries.Add(new Gxt2Entry
+                entryMap[hash] = new Gxt2Entry
                 {
                     Hash = hash,
                     Text = valPart
-                });
+                };
             }
 
+            var entries = entryMap.Values.ToList();
             entries.Sort((a, b) => a.Hash.CompareTo(b.Hash));
 
             var gxt = new Gxt2File

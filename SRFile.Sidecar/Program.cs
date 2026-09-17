@@ -225,10 +225,10 @@ app.MapPost("/api/rpf/extract-folder", (ExtractFolderRequest req, RpfService ser
     {
         if (req.AsZip == true)
         {
-            byte[] zipData = service.ExtractFolderToZip(req.RpfPath, req.FolderPath, req.Recursive ?? true);
+            var zipStream = service.ExtractFolderToZipStream(req.RpfPath, req.FolderPath, req.Recursive ?? true);
             string folderName = Path.GetFileName(req.FolderPath.TrimEnd('/', '\\'));
             if (string.IsNullOrEmpty(folderName)) folderName = "archive_folder";
-            return Results.File(zipData, "application/zip", fileDownloadName: $"{folderName}.zip");
+            return Results.Stream(zipStream, "application/zip", fileDownloadName: $"{folderName}.zip");
         }
         else
         {
@@ -251,8 +251,8 @@ app.MapPost("/api/rpf/extract-batch", (ExtractBatchRequest req, RpfService servi
     {
         if (req.AsZip == true)
         {
-            byte[] zipData = service.ExtractBatchToZip(req.RpfPath, req.EntryPaths);
-            return Results.File(zipData, "application/zip", fileDownloadName: "batch_export.zip");
+            var zipStream = service.ExtractBatchToZipStream(req.RpfPath, req.EntryPaths);
+            return Results.Stream(zipStream, "application/zip", fileDownloadName: "batch_export.zip");
         }
         else
         {

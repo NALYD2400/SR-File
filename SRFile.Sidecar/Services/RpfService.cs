@@ -242,7 +242,10 @@ namespace SRFile.Sidecar.Services
             var entry = FindFileEntry(rpf, entryPath);
             if (entry == null) throw new FileNotFoundException($"Entry not found: {entryPath}");
 
-            return entry.File.ExtractFile(entry);
+            byte[]? data = entry.File.ExtractFile(entry);
+            if (data == null) throw new InvalidDataException($"Failed to extract data for '{entryPath}' from archive '{rpfPath}'.");
+
+            return data;
         }
 
         public string ExtractFileText(string rpfPath, string entryPath, int maxChars = 100000)
@@ -516,7 +519,14 @@ namespace SRFile.Sidecar.Services
             {
                 try
                 {
-                    byte[] data = entry.File.ExtractFile(entry);
+                    byte[]? data = entry.File.ExtractFile(entry);
+                    if (data == null)
+                    {
+                        errors++;
+                        errorList.Add($"{entry.Path}: Échec d'extraction de données (clé ou archive corrompue).");
+                        continue;
+                    }
+
                     string dest = Path.Combine(outputDir, relPath);
                     string? pDir = Path.GetDirectoryName(dest);
                     if (!string.IsNullOrEmpty(pDir) && !Directory.Exists(pDir))
@@ -546,7 +556,7 @@ namespace SRFile.Sidecar.Services
             );
         }
 
-        public byte[] ExtractFolderToZip(string rpfPath, string folderPath, bool recursive = true)
+        public Stream ExtractFolderToZipStream(string rpfPath, string folderPath, bool recursive = true)
         {
             var rpf = GetOrLoadRpf(rpfPath);
             if (rpf == null) throw new FileNotFoundException("RPF not open");
@@ -557,14 +567,18 @@ namespace SRFile.Sidecar.Services
             var fileList = new List<(RpfFileEntry File, string RelPath)>();
             CollectDirectoryFiles(dir, "", recursive, fileList);
 
-            using var ms = new MemoryStream();
-            using (var archive = new ZipArchive(ms, ZipArchiveMode.Create, true))
+            string tempFile = Path.Combine(Path.GetTempPath(), $"srfile_export_{Guid.NewGuid():N}.zip");
+            var fs = new FileStream(tempFile, FileMode.Create, FileAccess.ReadWrite, FileShare.None, 65536, FileOptions.DeleteOnClose);
+
+            using (var archive = new ZipArchive(fs, ZipArchiveMode.Create, leaveOpen: true))
             {
                 foreach (var (entry, relPath) in fileList)
                 {
                     try
                     {
-                        byte[] data = entry.File.ExtractFile(entry);
+                        byte[]? data = entry.File.ExtractFile(entry);
+                        if (data == null) continue;
+
                         var zipEntry = archive.CreateEntry(relPath.Replace('\\', '/'), CompressionLevel.Fastest);
                         using var s = zipEntry.Open();
                         s.Write(data, 0, data.Length);
@@ -575,6 +589,16 @@ namespace SRFile.Sidecar.Services
                     }
                 }
             }
+
+            fs.Position = 0;
+            return fs;
+        }
+
+        public byte[] ExtractFolderToZip(string rpfPath, string folderPath, bool recursive = true)
+        {
+            using var stream = ExtractFolderToZipStream(rpfPath, folderPath, recursive);
+            using var ms = new MemoryStream();
+            stream.CopyTo(ms);
             return ms.ToArray();
         }
 
@@ -590,6 +614,7 @@ namespace SRFile.Sidecar.Services
             var errorList = new List<string>();
 
             Directory.CreateDirectory(outputDir);
+            var writtenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var path in entryPaths)
             {
@@ -603,8 +628,24 @@ namespace SRFile.Sidecar.Services
                         continue;
                     }
 
-                    byte[] data = entry.File.ExtractFile(entry);
-                    string dest = Path.Combine(outputDir, entry.Name);
+                    byte[]? data = entry.File.ExtractFile(entry);
+                    if (data == null)
+                    {
+                        errors++;
+                        errorList.Add($"Failed to extract: {path}");
+                        continue;
+                    }
+
+                    string outFilename = entry.Name;
+                    if (!writtenNames.Add(outFilename))
+                    {
+                        string nameWithoutExt = Path.GetFileNameWithoutExtension(entry.Name);
+                        string ext = Path.GetExtension(entry.Name);
+                        outFilename = $"{nameWithoutExt}_{extracted + 1}{ext}";
+                        writtenNames.Add(outFilename);
+                    }
+
+                    string dest = Path.Combine(outputDir, outFilename);
                     File.WriteAllBytes(dest, data);
                     extracted++;
                     totalBytes += data.Length;
@@ -628,14 +669,17 @@ namespace SRFile.Sidecar.Services
             );
         }
 
-        public byte[] ExtractBatchToZip(string rpfPath, List<string> entryPaths)
+        public Stream ExtractBatchToZipStream(string rpfPath, List<string> entryPaths)
         {
             var rpf = GetOrLoadRpf(rpfPath);
             if (rpf == null) throw new FileNotFoundException("RPF not open");
 
-            using var ms = new MemoryStream();
-            using (var archive = new ZipArchive(ms, ZipArchiveMode.Create, true))
+            string tempFile = Path.Combine(Path.GetTempPath(), $"srfile_batch_{Guid.NewGuid():N}.zip");
+            var fs = new FileStream(tempFile, FileMode.Create, FileAccess.ReadWrite, FileShare.None, 65536, FileOptions.DeleteOnClose);
+
+            using (var archive = new ZipArchive(fs, ZipArchiveMode.Create, leaveOpen: true))
             {
+                var addedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var path in entryPaths)
                 {
                     try
@@ -643,8 +687,19 @@ namespace SRFile.Sidecar.Services
                         var entry = FindFileEntry(rpf, path);
                         if (entry == null) continue;
 
-                        byte[] data = entry.File.ExtractFile(entry);
-                        var zipEntry = archive.CreateEntry(entry.Name, CompressionLevel.Fastest);
+                        byte[]? data = entry.File.ExtractFile(entry);
+                        if (data == null) continue;
+
+                        string entryName = entry.Name;
+                        if (!addedNames.Add(entryName))
+                        {
+                            string nameWithoutExt = Path.GetFileNameWithoutExtension(entry.Name);
+                            string ext = Path.GetExtension(entry.Name);
+                            entryName = $"{nameWithoutExt}_{addedNames.Count}{ext}";
+                            addedNames.Add(entryName);
+                        }
+
+                        var zipEntry = archive.CreateEntry(entryName, CompressionLevel.Fastest);
                         using var s = zipEntry.Open();
                         s.Write(data, 0, data.Length);
                     }
@@ -654,6 +709,16 @@ namespace SRFile.Sidecar.Services
                     }
                 }
             }
+
+            fs.Position = 0;
+            return fs;
+        }
+
+        public byte[] ExtractBatchToZip(string rpfPath, List<string> entryPaths)
+        {
+            using var stream = ExtractBatchToZipStream(rpfPath, entryPaths);
+            using var ms = new MemoryStream();
+            stream.CopyTo(ms);
             return ms.ToArray();
         }
 
@@ -787,17 +852,19 @@ namespace SRFile.Sidecar.Services
 
             Interlocked.Increment(ref _cacheMisses);
 
+            bool hasDirectory = norm.Contains('\\') || norm.Contains('/');
             string fileName = Path.GetFileName(norm);
+
             foreach (var rpf in GetAllRpfs(rootRpf))
             {
                 if (rpf.AllEntries == null) continue;
 
-                // 1. Exact path match
+                // 1. Exact path match or ends with directory+file
                 var match = rpf.AllEntries.OfType<RpfFileEntry>().FirstOrDefault(f =>
                     string.Equals(f.Path?.ToLowerInvariant(), norm, StringComparison.OrdinalIgnoreCase) ||
                     (f.Path != null && f.Path.ToLowerInvariant().EndsWith("\\" + norm)) ||
-                    string.Equals(f.NameLower, fileName, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(f.NameLower, norm, StringComparison.OrdinalIgnoreCase));
+                    (!hasDirectory && string.Equals(f.NameLower, fileName, StringComparison.OrdinalIgnoreCase)) ||
+                    (!hasDirectory && string.Equals(f.NameLower, norm, StringComparison.OrdinalIgnoreCase)));
 
                 if (match != null)
                 {
@@ -834,8 +901,12 @@ namespace SRFile.Sidecar.Services
         public static RpfIndex Build(RpfFile rootRpf)
         {
             var index = new RpfIndex();
+            string rootPrefix = Normalize(rootRpf.Name ?? rootRpf.Path ?? "");
+
             foreach (var rpf in RpfService.GetAllRpfs(rootRpf))
             {
+                string rpfPrefix = Normalize(rpf.Name ?? rpf.Path ?? "");
+
                 if (rpf.Root != null)
                 {
                     index.DirLookup[""] = rpf.Root;
@@ -843,7 +914,9 @@ namespace SRFile.Sidecar.Services
                     index.DirLookup["\\"] = rpf.Root;
                     if (!string.IsNullOrEmpty(rpf.Root.Path))
                     {
-                        index.DirLookup[Normalize(rpf.Root.Path)] = rpf.Root;
+                        string normPath = Normalize(rpf.Root.Path);
+                        index.DirLookup[normPath] = rpf.Root;
+                        index.DirLookup.TryAdd(Normalize(rpf.Root.Name), rpf.Root);
                     }
                 }
 
@@ -855,8 +928,24 @@ namespace SRFile.Sidecar.Services
                         {
                             if (!string.IsNullOrEmpty(dir.Path))
                             {
-                                index.DirLookup[Normalize(dir.Path)] = dir;
+                                string normPath = Normalize(dir.Path);
+                                index.DirLookup[normPath] = dir;
+
+                                // Also index path relative to root RPF
+                                if (!string.IsNullOrEmpty(rootPrefix) && normPath.StartsWith(rootPrefix + "\\"))
+                                {
+                                    string rel = normPath.Substring(rootPrefix.Length + 1);
+                                    index.DirLookup[rel] = dir;
+                                }
+
+                                // If inside child RPF, index relative to that RPF
+                                if (rpf != rootRpf && !string.IsNullOrEmpty(rpfPrefix) && normPath.StartsWith(rpfPrefix + "\\"))
+                                {
+                                    string rel = normPath.Substring(rpfPrefix.Length + 1);
+                                    index.DirLookup[rel] = dir;
+                                }
                             }
+
                             if (!string.IsNullOrEmpty(dir.Name))
                             {
                                 index.DirLookup.TryAdd(Normalize(dir.Name), dir);
@@ -866,8 +955,24 @@ namespace SRFile.Sidecar.Services
                         {
                             if (!string.IsNullOrEmpty(file.Path))
                             {
-                                index.FileLookup[Normalize(file.Path)] = file;
+                                string normPath = Normalize(file.Path);
+                                index.FileLookup[normPath] = file;
+
+                                // Also index path relative to root RPF
+                                if (!string.IsNullOrEmpty(rootPrefix) && normPath.StartsWith(rootPrefix + "\\"))
+                                {
+                                    string rel = normPath.Substring(rootPrefix.Length + 1);
+                                    index.FileLookup[rel] = file;
+                                }
+
+                                // If inside child RPF, index relative to that child RPF
+                                if (rpf != rootRpf && !string.IsNullOrEmpty(rpfPrefix) && normPath.StartsWith(rpfPrefix + "\\"))
+                                {
+                                    string rel = normPath.Substring(rpfPrefix.Length + 1);
+                                    index.FileLookup[rel] = file;
+                                }
                             }
+
                             if (!string.IsNullOrEmpty(file.Name))
                             {
                                 index.FileLookup.TryAdd(Normalize(file.Name), file);

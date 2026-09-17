@@ -1129,6 +1129,130 @@ namespace SRFile.Sidecar.Tests
                 }
             }
         }
+
+        [Fact]
+        public void Gxt2_UnicodeAccents_ColorTokens_And_Deduplication()
+        {
+            var service = new TextService();
+            string source = @"
+                0x11223344 = ~r~Alerte rouge : ~g~Véhicule blindé à 100€ — Événement débloqué !
+                0x11223344 = ~y~Mise à jour : Prix réduit à 50€ ~w~avec succès !
+                0xAABB0011 = ~HUD_COLOUR_RED~MISSION ACTIVE : Neutraliser la cible
+            ";
+
+            byte[] bytes = service.BuildGxt2(source, "french.gxt2");
+            Assert.NotNull(bytes);
+
+            var table = service.ParseGxt2(bytes, "french.gxt2");
+            Assert.NotNull(table);
+            // Deduplication must reduce 3 raw lines (with 1 duplicate) to 2 unique entries
+            Assert.Equal(2u, table.EntryCount);
+
+            // Verify the duplicate was overwritten by the second value
+            var entry1 = table.Entries.FirstOrDefault(e => e.HexHash == "0x11223344");
+            Assert.NotNull(entry1);
+            Assert.Contains("Mise à jour", entry1.Text);
+            Assert.Contains("50€", entry1.Text);
+            Assert.Contains("succès", entry1.Text);
+
+            var entry2 = table.Entries.FirstOrDefault(e => e.HexHash == "0xAABB0011");
+            Assert.NotNull(entry2);
+            Assert.Contains("~HUD_COLOUR_RED~", entry2.Text);
+            Assert.Contains("Neutraliser", entry2.Text);
+        }
+
+        [Fact]
+        public void RpfCache_ImmediateRelativeHit_And_NoFalseMatches()
+        {
+            string tempDir = Path.Combine(Path.GetTempPath(), "SRFile_CacheAccuracy_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            string rpfPath = Path.Combine(tempDir, "accuracy.rpf");
+
+            try
+            {
+                var rpf = CodeWalker.GameFiles.RpfFile.CreateNew(tempDir, "accuracy.rpf", CodeWalker.GameFiles.RpfEncryption.OPEN);
+                var dirA = CodeWalker.GameFiles.RpfFile.CreateDirectory(rpf.Root, "dirA");
+                var dirB = CodeWalker.GameFiles.RpfFile.CreateDirectory(rpf.Root, "dirB");
+
+                CodeWalker.GameFiles.RpfFile.CreateFile(dirA, "data.xml", Encoding.UTF8.GetBytes("<data>A</data>"), true);
+                CodeWalker.GameFiles.RpfFile.CreateFile(dirB, "data.xml", Encoding.UTF8.GetBytes("<data>B</data>"), true);
+
+                var service = new RpfService();
+                service.OpenRpf(rpfPath);
+
+                // 1. Initial access using relative path MUST be a cache hit directly from index
+                byte[] dataA = service.ExtractFile(rpfPath, "dirA\\data.xml");
+                Assert.Equal("<data>A</data>", Encoding.UTF8.GetString(dataA));
+
+                var stats = service.GetCacheStats();
+                Assert.Equal(1, stats.CacheHits);
+                Assert.Equal(0, stats.CacheMisses);
+
+                // 2. Relative path for dirB
+                byte[] dataB = service.ExtractFile(rpfPath, "dirB\\data.xml");
+                Assert.Equal("<data>B</data>", Encoding.UTF8.GetString(dataB));
+                Assert.Equal(2, service.GetCacheStats().CacheHits);
+
+                // 3. Requesting non-existent folder with existing filename MUST NOT return a false match
+                Assert.Throws<FileNotFoundException>(() => service.ExtractFile(rpfPath, "missingDir\\data.xml"));
+            }
+            finally
+            {
+                if (Directory.Exists(tempDir))
+                {
+                    try { Directory.Delete(tempDir, true); } catch { }
+                }
+            }
+        }
+
+        [Fact]
+        public void ExtractZipStream_And_BatchDisambiguation_WorkCleanly()
+        {
+            string tempDir = Path.Combine(Path.GetTempPath(), "SRFile_StreamBatch_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            string rpfPath = Path.Combine(tempDir, "stream_test.rpf");
+
+            try
+            {
+                var rpf = CodeWalker.GameFiles.RpfFile.CreateNew(tempDir, "stream_test.rpf", CodeWalker.GameFiles.RpfEncryption.OPEN);
+                var dir1 = CodeWalker.GameFiles.RpfFile.CreateDirectory(rpf.Root, "folder1");
+                var dir2 = CodeWalker.GameFiles.RpfFile.CreateDirectory(rpf.Root, "folder2");
+
+                CodeWalker.GameFiles.RpfFile.CreateFile(dir1, "config.meta", Encoding.UTF8.GetBytes("config1"), true);
+                CodeWalker.GameFiles.RpfFile.CreateFile(dir2, "config.meta", Encoding.UTF8.GetBytes("config2"), true);
+
+                var service = new RpfService();
+                service.OpenRpf(rpfPath);
+
+                // 1. ExtractFolderToZipStream returns a readable zip stream
+                using (var zipStream = service.ExtractFolderToZipStream(rpfPath, "folder1"))
+                {
+                    Assert.NotNull(zipStream);
+                    Assert.True(zipStream.CanRead);
+                    Assert.True(zipStream.Length > 0);
+
+                    using var archive = new System.IO.Compression.ZipArchive(zipStream, System.IO.Compression.ZipArchiveMode.Read, leaveOpen: true);
+                    Assert.Single(archive.Entries);
+                    Assert.Equal("config.meta", archive.Entries[0].Name);
+                }
+
+                // 2. ExtractBatchToDisk with duplicate filenames in different folders writes both without overwriting
+                string batchOut = Path.Combine(tempDir, "batch_out");
+                var result = service.ExtractBatchToDisk(rpfPath, new List<string> { "folder1\\config.meta", "folder2\\config.meta" }, batchOut);
+                Assert.True(result.Success);
+                Assert.Equal(2, result.ExtractedCount);
+
+                var files = Directory.GetFiles(batchOut);
+                Assert.Equal(2, files.Length);
+            }
+            finally
+            {
+                if (Directory.Exists(tempDir))
+                {
+                    try { Directory.Delete(tempDir, true); } catch { }
+                }
+            }
+        }
     }
 }
 
