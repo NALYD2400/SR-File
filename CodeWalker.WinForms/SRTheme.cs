@@ -878,6 +878,8 @@ namespace CodeWalker.WinForms
             if (typeName == "WorldForm")
             {
                 form.FormBorderStyle = FormBorderStyle.None;
+                form.Padding = Padding.Empty;
+                form.Margin = Padding.Empty;
             }
 
             bool isBorderless = (form.FormBorderStyle == FormBorderStyle.None);
@@ -889,6 +891,7 @@ namespace CodeWalker.WinForms
 
             form.Controls.Add(navbar);
             navbar.SendToBack(); // In WinForms docking, SendToBack ensures Top dock at Y=0 above existing controls
+            navbar.Location = new Point(0, 0);
 
             int navHeight = navbar.Height;
             foreach (Control c in form.Controls)

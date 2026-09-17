@@ -446,6 +446,7 @@ namespace CodeWalker.WinForms
     public class BorderlessFormResizer : NativeWindow
     {
         private readonly Form _form;
+        private const int WM_NCCALCSIZE = 0x83;
         private const int WM_NCHITTEST = 0x84;
         private const int WM_GETMINMAXINFO = 0x24;
         private const int HTLEFT = 10;
@@ -485,6 +486,13 @@ namespace CodeWalker.WinForms
 
         protected override void WndProc(ref Message m)
         {
+            if (m.Msg == WM_NCCALCSIZE)
+            {
+                // Suppress Windows non-client frame calculation completely to eliminate the top bar
+                m.Result = IntPtr.Zero;
+                return;
+            }
+
             if (m.Msg == WM_GETMINMAXINFO && _form != null && !_form.IsDisposed)
             {
                 base.WndProc(ref m);

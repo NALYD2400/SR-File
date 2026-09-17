@@ -218,7 +218,6 @@ namespace CodeWalker
             {
                 CreateParams cp = base.CreateParams;
                 cp.Style |= 0x02000000; // WS_CLIPCHILDREN to ensure DirectX does not overwrite child controls
-                cp.Style |= 0x00040000; // WS_SIZEBOX (enables resizing and aero snap in borderless mode)
                 cp.ClassStyle |= 0x00020000; // CS_DROPSHADOW
                 return cp;
             }
