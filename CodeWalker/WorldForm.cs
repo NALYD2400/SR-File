@@ -31,6 +31,7 @@ namespace CodeWalker
         volatile bool running = false;
         volatile bool pauserendering = false;
         volatile bool initialised = false;
+        private Microsoft.Web.WebView2.WinForms.WebView2 webViewTools = null;
 
         Stopwatch frametimer = new Stopwatch();
         Space space = new Space();
@@ -3751,6 +3752,21 @@ namespace CodeWalker
             SelArchetypePropertyGrid.SelectedObject = item.Archetype;
             SelDrawablePropertyGrid.SelectedObject = item.Drawable;
 
+            if (webViewTools != null && webViewTools.CoreWebView2 != null)
+            {
+                try
+                {
+                    bool hasSel = item.HasValue && item.EntityDef != null;
+                    string name = (item.GetNameString("Nothing selected") ?? "Rien de sélectionné").Replace("\"", "\\\"");
+                    string hash = item.EntityDef != null && item.EntityDef.Archetype != null ? item.EntityDef.Archetype.Hash.ToString() : "N/A";
+                    string pos = item.EntityDef != null ? FloatUtil.GetVector3StringFormat(item.EntityDef.Position, "0.00") : "0.0, 0.0, 0.0";
+                    string arch = item.Archetype != null ? item.Archetype.Name : "N/A";
+                    string msg = $"{{\"type\":\"selection\",\"hasSelection\":{hasSel.ToString().ToLower()},\"name\":\"{name}\",\"hash\":\"{hash}\",\"pos\":\"{pos}\",\"archetype\":\"{arch}\"}}";
+                    webViewTools.CoreWebView2.PostWebMessageAsJson(msg);
+                }
+                catch { }
+            }
+
             Renderer.SelectionModelDrawFlags.Clear();
             Renderer.SelectionGeometryDrawFlags.Clear();
             SelDrawableModelsTreeView.Nodes.Clear();
@@ -6173,12 +6189,28 @@ namespace CodeWalker
             }
 
             CameraPositionTextBox.Text = FloatUtil.GetVector3StringFormat(camera.Position, "0.##");
+
+            if (webViewTools != null && webViewTools.CoreWebView2 != null)
+            {
+                try
+                {
+                    float cx = camera.Position.X;
+                    float cy = camera.Position.Y;
+                    float cz = camera.Position.Z;
+                    int fps = Renderer.CurrentFPS;
+                    long drawn = Renderer.RenderedGeometries;
+                    string msg = $"{{\"type\":\"tick\",\"camX\":{cx.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"camY\":{cy.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"camZ\":{cz.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"fps\":{fps},\"drawn\":{drawn}}}";
+                    webViewTools.CoreWebView2.PostWebMessageAsJson(msg);
+                }
+                catch { }
+            }
         }
 
         private void WorldForm_Load(object sender, EventArgs e)
         {
             Init();
             try { SRThemeManager.ApplyTheme(this); } catch { }
+            InitWebToolsPanel();
         }
 
         private void WorldForm_FormClosing(object sender, FormClosingEventArgs e)
@@ -6723,6 +6755,8 @@ namespace CodeWalker
         private void ToolsPanelShowButton_Click(object sender, EventArgs e)
         {
             ToolsPanel.Visible = true;
+            ToolsPanel.BringToFront();
+            if (webViewTools != null) webViewTools.BringToFront();
             ToolsPanelHideButton.Focus();
         }
 
@@ -8068,6 +8102,324 @@ namespace CodeWalker
         {
             SubtitleTimer.Enabled = false;
             SubtitleLabel.Visible = false;
+        }
+
+        private async void InitWebToolsPanel()
+        {
+            try
+            {
+                if (webViewTools != null) return;
+
+                ToolsPanel.Width = 380;
+                ToolsPanel.BackColor = System.Drawing.Color.FromArgb(10, 14, 22);
+
+                try
+                {
+                    ToolsTabControl.Visible = false;
+                    ToolsDragPanel.Visible = false;
+                    AboutButton.Visible = false;
+                    ToolsButton.Visible = false;
+                    ToolsPanelExpandButton.Visible = false;
+                    ToolsPanelHideButton.Visible = false;
+                }
+                catch { }
+
+                webViewTools = new Microsoft.Web.WebView2.WinForms.WebView2();
+                webViewTools.Dock = DockStyle.Fill;
+                ToolsPanel.Controls.Add(webViewTools);
+                webViewTools.BringToFront();
+
+                string userDataFolder = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "SRFile", "WebView2_WorldTools");
+                var env = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateAsync(null, userDataFolder);
+                await webViewTools.EnsureCoreWebView2Async(env);
+
+                webViewTools.CoreWebView2.Settings.IsStatusBarEnabled = false;
+                webViewTools.CoreWebView2.Settings.AreDevToolsEnabled = true;
+                webViewTools.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+
+                webViewTools.WebMessageReceived += WebViewTools_WebMessageReceived;
+
+                string htmlPath = System.IO.Path.Combine(Application.StartupPath, "WebUI", "world_tools.html");
+                if (System.IO.File.Exists(htmlPath))
+                {
+                    webViewTools.CoreWebView2.Navigate(htmlPath);
+                }
+                else
+                {
+                    string devPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.StartupPath, "..", "..", "..", "CodeWalker", "WebUI", "world_tools.html"));
+                    if (System.IO.File.Exists(devPath))
+                    {
+                        webViewTools.CoreWebView2.Navigate(devPath);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("InitWebToolsPanel error: " + ex.Message);
+            }
+        }
+
+        private void WebViewTools_WebMessageReceived(object sender, Microsoft.Web.WebView2.Core.CoreWebView2WebMessageReceivedEventArgs e)
+        {
+            try
+            {
+                string json = e.WebMessageAsJson;
+                if (string.IsNullOrEmpty(json)) return;
+
+                if (json.Contains("\"hide_panel\""))
+                {
+                    this.BeginInvoke(new Action(() => {
+                        ToolsPanel.Visible = false;
+                        ToolsPanelShowButton.Focus();
+                    }));
+                }
+                else if (json.Contains("\"ui_ready\""))
+                {
+                    this.BeginInvoke(new Action(() => {
+                        SendInitToWebTools();
+                    }));
+                }
+                else if (json.Contains("\"set_lod_dist\""))
+                {
+                    var match = System.Text.RegularExpressions.Regex.Match(json, "\"value\":\\s*([0-9.]+)");
+                    if (match.Success && float.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float val))
+                    {
+                        Renderer.renderworldLodDistMult = val;
+                        WorldLodDistLabel.Text = val.ToString("0.0");
+                    }
+                }
+                else if (json.Contains("\"set_detail_dist\""))
+                {
+                    var match = System.Text.RegularExpressions.Regex.Match(json, "\"value\":\\s*([0-9.]+)");
+                    if (match.Success && float.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float val))
+                    {
+                        Renderer.renderworldDetailDistMult = val;
+                        WorldDetailDistLabel.Text = val.ToString("0.0");
+                    }
+                }
+                else if (json.Contains("\"set_max_lod\""))
+                {
+                    var match = System.Text.RegularExpressions.Regex.Match(json, "\"value\":\\s*\"([^\"]+)\"");
+                    if (match.Success)
+                    {
+                        string val = match.Groups[1].Value;
+                        this.BeginInvoke(new Action(() => {
+                            WorldMaxLodComboBox.SelectedItem = val;
+                        }));
+                    }
+                }
+                else if (json.Contains("\"teleport\""))
+                {
+                    var mx = System.Text.RegularExpressions.Regex.Match(json, "\"x\":\\s*(-?[0-9.]+)");
+                    var my = System.Text.RegularExpressions.Regex.Match(json, "\"y\":\\s*(-?[0-9.]+)");
+                    var mz = System.Text.RegularExpressions.Regex.Match(json, "\"z\":\\s*(-?[0-9.]+)");
+                    if (mx.Success && my.Success && mz.Success)
+                    {
+                        if (float.TryParse(mx.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float x) &&
+                            float.TryParse(my.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float y) &&
+                            float.TryParse(mz.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float z))
+                        {
+                            this.BeginInvoke(new Action(() => {
+                                GoToPosition(new Vector3(x, y, z));
+                            }));
+                        }
+                    }
+                }
+                else if (json.Contains("\"set_time_of_day\""))
+                {
+                    var match = System.Text.RegularExpressions.Regex.Match(json, "\"minutes\":\\s*([0-9]+)");
+                    if (match.Success && int.TryParse(match.Groups[1].Value, out int mins))
+                    {
+                        this.BeginInvoke(new Action(() => {
+                            SetTimeOfDay(mins);
+                            TimeOfDayTrackBar.Value = Math.Max(0, Math.Min(1440, mins));
+                        }));
+                    }
+                }
+                else if (json.Contains("\"set_weather\""))
+                {
+                    var match = System.Text.RegularExpressions.Regex.Match(json, "\"weather\":\\s*\"([^\"]+)\"");
+                    if (match.Success)
+                    {
+                        string wth = match.Groups[1].Value;
+                        this.BeginInvoke(new Action(() => {
+                            Renderer.SetWeatherType(wth);
+                            WeatherComboBox.SelectedItem = wth;
+                        }));
+                    }
+                }
+                else if (json.Contains("\"toggle_scripted_ymaps\""))
+                {
+                    bool val = json.Contains("\"value\":true");
+                    Renderer.ShowScriptedYmaps = val;
+                    WorldScriptedYmapsCheckBox.Checked = val;
+                }
+                else if (json.Contains("\"toggle_time_filter\""))
+                {
+                    bool val = json.Contains("\"value\":true");
+                    worldymaptimefilter = val;
+                    WorldYmapTimeFilterCheckBox.Checked = val;
+                }
+                else if (json.Contains("\"toggle_weather_filter\""))
+                {
+                    bool val = json.Contains("\"value\":true");
+                    worldymapweatherfilter = val;
+                    WorldYmapWeatherFilterCheckBox.Checked = val;
+                }
+                else if (json.Contains("\"toggle_mods\""))
+                {
+                    bool val = json.Contains("\"value\":true");
+                    if (initialised && ProjectForm == null)
+                    {
+                        SetModsEnabled(val);
+                        EnableModsCheckBox.Checked = val;
+                    }
+                }
+                else if (json.Contains("\"toggle_dlc\""))
+                {
+                    bool val = json.Contains("\"value\":true");
+                    if (initialised && ProjectForm == null)
+                    {
+                        SetDlcLevel(DlcLevelComboBox.Text, val);
+                        EnableDlcCheckBox.Checked = val;
+                    }
+                }
+                else if (json.Contains("\"toggle_markers\""))
+                {
+                    bool val = json.Contains("\"value\":true");
+                    ShowLocatorCheckBox.Checked = val;
+                    RenderLocator = val;
+                }
+                else if (json.Contains("\"toggle_marker_text\""))
+                {
+                    bool val = json.Contains("\"value\":true");
+                    RenderLocator = val;
+                }
+                else if (json.Contains("\"toggle_wireframe\""))
+                {
+                    bool val = json.Contains("\"value\":true");
+                    Renderer.shaders.wireframe = val;
+                    WireframeCheckBox.Checked = val;
+                }
+                else if (json.Contains("\"toggle_collisions\""))
+                {
+                    bool val = json.Contains("\"value\":true");
+                    rendercollisionmeshes = val;
+                    CollisionMeshesCheckBox.Checked = val;
+                }
+                else if (json.Contains("\"toggle_navmeshes\""))
+                {
+                    bool val = json.Contains("\"value\":true");
+                    rendernavmeshes = val;
+                    NavMeshesCheckBox.Checked = val;
+                }
+                else if (json.Contains("\"toggle_paths\""))
+                {
+                    bool val = json.Contains("\"value\":true");
+                    renderpaths = val;
+                    PathsCheckBox.Checked = val;
+                }
+                else if (json.Contains("\"toggle_water\""))
+                {
+                    bool val = json.Contains("\"value\":true");
+                    renderwaterquads = val;
+                    WaterQuadsCheckBox.Checked = val;
+                }
+                else if (json.Contains("\"toggle_trees\""))
+                {
+                    bool val = json.Contains("\"value\":true");
+                }
+                else if (json.Contains("\"toggle_grass\""))
+                {
+                    bool val = json.Contains("\"value\":true");
+                    Renderer.rendergrass = val;
+                    GrassCheckBox.Checked = val;
+                }
+                else if (json.Contains("\"toggle_hd_lights\""))
+                {
+                    bool val = json.Contains("\"value\":true");
+                    Renderer.renderlights = val;
+                    HDLightsCheckBox.Checked = val;
+                }
+                else if (json.Contains("\"toggle_lod_lights\""))
+                {
+                    bool val = json.Contains("\"value\":true");
+                    Renderer.renderdistlodlights = val;
+                    Renderer.renderlodlights = val;
+                    LODLightsCheckBox.Checked = val;
+                }
+                else if (json.Contains("\"toggle_shadows\""))
+                {
+                    bool val = json.Contains("\"value\":true");
+                    ShadowsCheckBox.Checked = val;
+                    lock (Renderer.RenderSyncRoot)
+                    {
+                        Renderer.shaders.shadows = val;
+                    }
+                }
+                else if (json.Contains("\"toggle_ssao\""))
+                {
+                    bool val = json.Contains("\"value\":true");
+                    DeferredShadingCheckBox.Checked = val;
+                    Renderer.shaders.deferred = val;
+                }
+                else if (json.Contains("\"toggle_bloom\""))
+                {
+                    bool val = json.Contains("\"value\":true");
+                    HDRRenderingCheckBox.Checked = val;
+                    Renderer.shaders.hdr = val;
+                }
+                else if (json.Contains("\"gc_collect\""))
+                {
+                    GC.Collect();
+                }
+                else if (json.Contains("\"selection_delete\""))
+                {
+                    this.BeginInvoke(new Action(() => {
+                        ToolbarDeleteItemButton_Click(this, EventArgs.Empty);
+                    }));
+                }
+                else if (json.Contains("\"selection_duplicate\""))
+                {
+                    this.BeginInvoke(new Action(() => {
+                        ToolbarCopyButton_Click(this, EventArgs.Empty);
+                        ToolbarPasteButton_Click(this, EventArgs.Empty);
+                    }));
+                }
+                else if (json.Contains("\"selection_focus\""))
+                {
+                    this.BeginInvoke(new Action(() => {
+                        if (SelectedItem.HasValue)
+                        {
+                            if (SelectedItem.EntityDef != null)
+                            {
+                                GoToPosition(SelectedItem.EntityDef.Position);
+                            }
+                            else if (Widget.Visible)
+                            {
+                                GoToPosition(Widget.Position);
+                            }
+                        }
+                    }));
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("WebViewTools_WebMessageReceived error: " + ex.Message);
+            }
+        }
+
+        private void SendInitToWebTools()
+        {
+            if (webViewTools == null || webViewTools.CoreWebView2 == null) return;
+            try
+            {
+                float lod = Renderer.renderworldLodDistMult;
+                float det = Renderer.renderworldDetailDistMult;
+                string msg = $"{{\"type\":\"init\",\"lodDist\":{lod.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"detDist\":{det.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}";
+                webViewTools.CoreWebView2.PostWebMessageAsJson(msg);
+            }
+            catch { }
         }
     }
 

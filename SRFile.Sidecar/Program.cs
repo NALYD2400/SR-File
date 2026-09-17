@@ -788,6 +788,76 @@ app.MapPost("/api/text/gxt2/build", (Gxt2BuildRequest req, TextService textServi
     }
 });
 
+// ==========================================
+// World 3D Engine Endpoints
+// ==========================================
+app.MapGet("/api/world/status", () =>
+{
+    bool isRunning = System.Diagnostics.Process.GetProcessesByName("SR File").Length > 0;
+    string? exePath = FindSrFileExe();
+    return Results.Ok(new
+    {
+        isRunning,
+        exeFound = !string.IsNullOrEmpty(exePath),
+        exePath
+    });
+});
+
+app.MapPost("/api/world/launch", (WorldLaunchRequest? req) =>
+{
+    try
+    {
+        string? exePath = FindSrFileExe();
+        if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
+        {
+            return Results.BadRequest(new { error = "L'exécutable SR File.exe est introuvable." });
+        }
+
+        string args = "-world";
+        if (req != null && !string.IsNullOrEmpty(req.Mode))
+        {
+            args = req.Mode.ToLowerInvariant();
+        }
+
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = exePath,
+            Arguments = args,
+            WorkingDirectory = Path.GetDirectoryName(exePath) ?? "",
+            UseShellExecute = true
+        };
+        var proc = System.Diagnostics.Process.Start(psi);
+        return Results.Ok(new { success = true, pid = proc?.Id, message = "Monde 3D DirectX 11 lancé avec succès !" });
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+static string? FindSrFileExe()
+{
+    string baseDir = AppContext.BaseDirectory;
+    string[] candidates = new[]
+    {
+        Path.Combine(baseDir, "..", "..", "..", "..", "Release", "SR File.exe"),
+        Path.Combine(baseDir, "..", "..", "..", "..", "CodeWalker", "bin", "x64", "Release", "net48", "SR File.exe"),
+        Path.Combine(baseDir, "..", "..", "..", "..", "win-x64", "SR File.exe"),
+        Path.Combine(baseDir, "Release", "SR File.exe"),
+        Path.Combine(baseDir, "SR File.exe")
+    };
+    foreach (var c in candidates)
+    {
+        try
+        {
+            string full = Path.GetFullPath(c);
+            if (File.Exists(full)) return full;
+        }
+        catch { }
+    }
+    return null;
+}
+
 // Shutdown
 app.MapPost("/api/shutdown", (IHostApplicationLifetime lifetime) =>
 {

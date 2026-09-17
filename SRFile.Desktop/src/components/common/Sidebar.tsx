@@ -14,7 +14,8 @@ import {
   Hash,
   KeyRound,
   Cpu,
-  Type
+  Type,
+  Compass,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 
@@ -40,6 +41,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeView, onSelectView, rpfL
       title: "Exploration & Assets",
       items: [
         { id: "dashboard", label: "Hub Central", icon: LayoutDashboard },
+        { id: "world_3d", label: "Monde 3D (NoClip)", icon: Compass, badge: "DX11" },
         { id: "explorer", label: "RPF Explorer", icon: FolderTree, badge: rpfLoaded ? "Actif" : undefined },
         { id: "textures", label: "Texture Studio", icon: Image },
         { id: "audio", label: "Lecteur AWC", icon: Music },

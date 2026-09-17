@@ -18,6 +18,7 @@ import { JenkinsTool } from "./components/crypto/JenkinsTool";
 import { CryptoTool } from "./components/crypto/CryptoTool";
 import { ProjectEditor } from "./components/project/ProjectEditor";
 import { Gxt2Studio } from "./components/editors/Gxt2Studio";
+import { World3DView } from "./components/world3d/World3DView";
 import { ToastProvider } from "./components/common/Toast";
 
 const queryClient = new QueryClient({
@@ -97,6 +98,8 @@ function AppContent() {
               onOpenSettings={() => setIsSettingsOpen(true)}
             />
           )}
+
+          {activeView === "world_3d" && <World3DView />}
 
           {activeView === "explorer" && (
             <RpfExplorer

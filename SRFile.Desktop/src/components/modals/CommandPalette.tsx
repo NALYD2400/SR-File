@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { RpfInfo, RpfEntry, ActiveView } from "../../types";
 import { api } from "../../api/client";
-import { Search, FolderOpen, Sliders, Database, File, X, ArrowRight, Type } from "lucide-react";
+import { Search, FolderOpen, Sliders, Database, File, X, ArrowRight, Type, Compass } from "lucide-react";
 import { formatBytes } from "../../lib/utils";
 
 interface CommandPaletteProps {
@@ -88,6 +88,20 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           {/* Default Quick Actions */}
           <div className="text-[10px] font-mono text-[#64748B] px-3 py-1 font-semibold uppercase">
             Actions Rapides
+          </div>
+
+          <div
+            onClick={() => {
+              onClose();
+              onSelectView("world_3d");
+            }}
+            className="flex items-center justify-between p-2.5 rounded-xl hover:bg-[#172030] text-[#94A3B8] hover:text-white cursor-pointer transition-colors"
+          >
+            <div className="flex items-center gap-2.5">
+              <Compass className="w-4 h-4 text-[#FF7A29]" />
+              <span>Monde 3D (DirectX 11 & NoClip)</span>
+            </div>
+            <ArrowRight className="w-3.5 h-3.5 text-[#64748B]" />
           </div>
 
           <div

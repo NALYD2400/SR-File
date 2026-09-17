@@ -35,6 +35,8 @@ namespace CodeWalker.Rendering
         private int framecount = 0;
         private float fcelapsed = 0.0f;
         private int fps = 0;
+        public int CurrentFPS { get { return fps; } }
+        public int RenderedGeometries { get { return (shaders != null) ? shaders.RenderedGeometries : 0; } }
 
         private DeviceContext context;
 

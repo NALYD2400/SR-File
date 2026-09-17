@@ -395,5 +395,10 @@ namespace SRFile.Sidecar.Models
         string? Base64Data,
         string? FileName
     );
+
+    public record WorldLaunchRequest(
+        string? StartPosition,
+        string? Mode
+    );
 }
 

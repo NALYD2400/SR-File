@@ -1,0 +1,904 @@
+﻿<!DOCTYPE html>
+<html lang="fr" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SR File - Outils 3D</title>
+  <style>
+    :root {
+      --bg: #0A0E16;
+      --surface: #121824;
+      --card: #182232;
+      --card-hover: #1E2B3E;
+      --border: #222D42;
+      --border-accent: rgba(255, 122, 41, 0.4);
+      --accent: #FF7A29;
+      --accent-hover: #FF8F4D;
+      --accent-glow: rgba(255, 122, 41, 0.25);
+      --text: #FFFFFF;
+      --subtext: #8E9CAE;
+      --success: #10B981;
+      --warning: #F59E0B;
+      --danger: #EF4444;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow-x: hidden;
+      overflow-y: auto;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      font-size: 13px;
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--accent);
+    }
+
+    header {
+      background: rgba(18, 24, 36, 0.95);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .header-title-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .badge-dx11 {
+      background: linear-gradient(135deg, var(--accent), #E05D10);
+      color: #FFF;
+      font-size: 9px;
+      font-weight: 800;
+      padding: 2px 6px;
+      border-radius: 999px;
+      letter-spacing: 0.5px;
+    }
+    .header-title {
+      font-weight: 800;
+      font-size: 13px;
+      letter-spacing: 0.5px;
+    }
+
+    .btn-header-action {
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--subtext);
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s ease;
+    }
+    .btn-header-action:hover {
+      border-color: var(--accent);
+      color: #FFF;
+      background: var(--card-hover);
+    }
+
+    /* Tabs Bar */
+    .tabs-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 4px;
+      gap: 4px;
+      position: sticky;
+      top: 47px;
+      z-index: 40;
+    }
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--subtext);
+      padding: 6px 4px;
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      transition: all 0.2s ease;
+    }
+    .tab-btn span.icon {
+      font-size: 14px;
+    }
+    .tab-btn:hover {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.05);
+    }
+    .tab-btn.active {
+      background: var(--card);
+      color: var(--accent);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--border-accent);
+    }
+
+    /* Content Area */
+    main {
+      flex: 1;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .tab-content {
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .tab-content.active {
+      display: flex;
+    }
+
+    /* Section Cards */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .card-title {
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--subtext);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* Modern Slider */
+    .slider-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .slider-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .slider-val {
+      color: var(--accent);
+      font-weight: 700;
+      font-family: monospace;
+    }
+    input[type="range"] {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: var(--card);
+      outline: none;
+      border: 1px solid var(--border);
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+      box-shadow: 0 0 8px var(--accent-glow);
+      transition: transform 0.15s ease;
+    }
+    input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+    }
+
+    /* Modern Toggle Row */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 0;
+    }
+    .toggle-label {
+      font-size: 12px;
+      color: var(--text);
+      font-weight: 500;
+    }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 38px;
+      height: 20px;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider-switch {
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background-color: var(--card);
+      border: 1px solid var(--border);
+      transition: .25s;
+      border-radius: 20px;
+    }
+    .slider-switch:before {
+      position: absolute;
+      content: "";
+      height: 14px;
+      width: 14px;
+      left: 2px;
+      bottom: 2px;
+      background-color: #FFF;
+      transition: .25s;
+      border-radius: 50%;
+    }
+    input:checked + .slider-switch {
+      background-color: var(--accent);
+      border-color: var(--accent);
+      box-shadow: 0 0 10px var(--accent-glow);
+    }
+    input:checked + .slider-switch:before {
+      transform: translateX(18px);
+    }
+
+    /* Select Dropdown */
+    .select-styled {
+      width: 100%;
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 7px 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      outline: none;
+      cursor: pointer;
+    }
+    .select-styled:focus {
+      border-color: var(--accent);
+    }
+
+    /* Buttons */
+    .btn-action {
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 7px 12px;
+      border-radius: 7px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+    }
+    .btn-action:hover {
+      background: var(--card-hover);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .btn-accent {
+      background: linear-gradient(135deg, var(--accent), #E05D10);
+      border: none;
+      color: #FFF;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      box-shadow: 0 4px 12px var(--accent-glow);
+      transition: all 0.2s ease;
+    }
+    .btn-accent:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px var(--accent-glow);
+    }
+
+    /* Coords display */
+    .coords-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
+    .coord-box {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 8px;
+      text-align: center;
+    }
+    .coord-lbl {
+      font-size: 10px;
+      font-weight: 800;
+      color: var(--subtext);
+    }
+    .coord-val {
+      font-family: monospace;
+      font-weight: 700;
+      font-size: 11.5px;
+      margin-top: 2px;
+    }
+
+    /* Preset POIs */
+    .poi-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .poi-btn {
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: left;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s ease;
+    }
+    .poi-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--card-hover);
+    }
+
+    /* Selection Inspector */
+    .prop-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11.5px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      padding: 4px 0;
+    }
+    .prop-name {
+      color: var(--subtext);
+      font-weight: 500;
+    }
+    .prop-val {
+      font-family: monospace;
+      color: var(--text);
+      font-weight: 600;
+      max-width: 170px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Footer Telemetry */
+    footer {
+      background: rgba(18, 24, 36, 0.95);
+      backdrop-filter: blur(10px);
+      border-top: 1px solid var(--border);
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--subtext);
+    }
+    .fps-badge {
+      color: var(--success);
+      font-weight: 800;
+      font-family: monospace;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 45px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: var(--card);
+      border: 1px solid var(--accent);
+      color: #FFF;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 11.5px;
+      font-weight: 600;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.25s ease;
+      z-index: 100;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="header-title-group">
+      <span class="badge-dx11">SR 3D</span>
+      <span class="header-title">OUTILS DU MONDE</span>
+    </div>
+    <div style="display: flex; gap: 6px;">
+      <button class="btn-header-action" onclick="send('open_project')" title="Ouvrir le gestionnaire de projet">📁</button>
+      <button class="btn-header-action" onclick="send('open_explorer')" title="Ouvrir l'explorateur RPF">📦</button>
+      <button class="btn-header-action" onclick="send('hide_panel')" title="Réduire le panneau (Mode plein écran)">✕</button>
+    </div>
+  </header>
+
+  <nav class="tabs-bar">
+    <button class="tab-btn active" onclick="setTab('world', this)">
+      <span class="icon">🌍</span>
+      <span>Monde</span>
+    </button>
+    <button class="tab-btn" onclick="setTab('markers', this)">
+      <span class="icon">📍</span>
+      <span>Téléport</span>
+    </button>
+    <button class="tab-btn" onclick="setTab('selection', this)">
+      <span class="icon">🎯</span>
+      <span>Sélection</span>
+    </button>
+    <button class="tab-btn" onclick="setTab('options', this)">
+      <span class="icon">⚙</span>
+      <span>Rendu</span>
+    </button>
+  </nav>
+
+  <main>
+    <!-- TAB 1: MONDE & VUE -->
+    <div id="tab-world" class="tab-content active">
+      <div class="card">
+        <div class="card-title">
+          <span>Distances de Rendu</span>
+        </div>
+        <div class="slider-group">
+          <div class="slider-header">
+            <span>Distance des LODs</span>
+            <span class="slider-val" id="valLodDist">1.0x</span>
+          </div>
+          <input type="range" id="rngLodDist" min="1" max="100" value="10" oninput="updateLodDist(this.value)" />
+        </div>
+        <div class="slider-group">
+          <div class="slider-header">
+            <span>Distance des Détails</span>
+            <span class="slider-val" id="valDetDist">1.0x</span>
+          </div>
+          <input type="range" id="rngDetDist" min="1" max="100" value="10" oninput="updateDetDist(this.value)" />
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>Niveau de LOD Maximal</span>
+        </div>
+        <select class="select-styled" id="selMaxLod" onchange="send('set_max_lod', { value: this.value })">
+          <option value="ORPHANHD">ORPHANHD (Qualité maximale)</option>
+          <option value="HD">HD</option>
+          <option value="LOD">LOD</option>
+          <option value="SLOD1">SLOD1</option>
+          <option value="SLOD2">SLOD2</option>
+          <option value="SLOD3">SLOD3</option>
+          <option value="SLOD4">SLOD4</option>
+        </select>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>Filtres & Contenu YMAP</span>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">YMAPs scriptés</span>
+          <label class="switch">
+            <input type="checkbox" id="chkScriptedYmaps" checked onchange="send('toggle_scripted_ymaps', { value: this.checked })" />
+            <span class="slider-switch"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Filtre horaire YMAP</span>
+          <label class="switch">
+            <input type="checkbox" id="chkTimeFilter" checked onchange="send('toggle_time_filter', { value: this.checked })" />
+            <span class="slider-switch"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Filtre météo YMAP</span>
+          <label class="switch">
+            <input type="checkbox" id="chkWeatherFilter" checked onchange="send('toggle_weather_filter', { value: this.checked })" />
+            <span class="slider-switch"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>Mods & DLCs</span>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Activer dossier /mods</span>
+          <label class="switch">
+            <input type="checkbox" id="chkEnableMods" onchange="send('toggle_mods', { value: this.checked })" />
+            <span class="slider-switch"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Activer les DLCs</span>
+          <label class="switch">
+            <input type="checkbox" id="chkEnableDlc" onchange="send('toggle_dlc', { value: this.checked })" />
+            <span class="slider-switch"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: MARQUEURS & TELEPORTATION -->
+    <div id="tab-markers" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          <span>Position Caméra Actuelle</span>
+          <button class="btn-action" style="padding: 2px 8px; font-size: 10px;" onclick="copyCoords()">Copier</button>
+        </div>
+        <div class="coords-grid">
+          <div class="coord-box">
+            <div class="coord-lbl">X</div>
+            <div class="coord-val" id="camX">0.0</div>
+          </div>
+          <div class="coord-box">
+            <div class="coord-lbl">Y</div>
+            <div class="coord-val" id="camY">0.0</div>
+          </div>
+          <div class="coord-box">
+            <div class="coord-lbl">Z</div>
+            <div class="coord-val" id="camZ">0.0</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>Téléportation Directe (XYZ)</span>
+        </div>
+        <div class="coords-grid" style="margin-bottom: 6px;">
+          <input type="number" step="1" id="tpX" placeholder="X" class="select-styled" style="padding: 6px;" />
+          <input type="number" step="1" id="tpY" placeholder="Y" class="select-styled" style="padding: 6px;" />
+          <input type="number" step="1" id="tpZ" placeholder="Z" class="select-styled" style="padding: 6px;" />
+        </div>
+        <button class="btn-accent" onclick="teleportCustom()">⚡ Téléporter Caméra</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>Lieux Remarquables GTA V</span>
+        </div>
+        <div class="poi-grid">
+          <button class="poi-btn" onclick="teleportTo(-75, -818, 326)">🏙 Maze Bank</button>
+          <button class="poi-btn" onclick="teleportTo(501, 5604, 797)">⛰ Mt Chiliad</button>
+          <button class="poi-btn" onclick="teleportTo(925, 46, 81)">🎰 Casino</button>
+          <button class="poi-btn" onclick="teleportTo(-1034, -2733, 14)">✈ Aéroport</button>
+          <button class="poi-btn" onclick="teleportTo(-2048, 3132, 33)">🎖 Zancudo</button>
+          <button class="poi-btn" onclick="teleportTo(711, 1198, 349)">🎬 Vinewood</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>Marqueurs</span>
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn-action" style="flex: 1;" onclick="send('add_current_marker')">+ Ma Position</button>
+          <button class="btn-action" style="flex: 1;" onclick="send('clear_markers')">Effacer Tout</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: SELECTION & ENTITE -->
+    <div id="tab-selection" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          <span>Objet Sélectionné</span>
+          <span id="selStatusBadge" style="font-size: 10px; color: var(--subtext);">Aucun</span>
+        </div>
+        <div style="background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px;">
+          <div style="font-weight: 800; font-size: 13px; color: var(--accent); margin-bottom: 2px;" id="selName">Rien de sélectionné</div>
+          <div style="font-size: 11px; color: var(--subtext); font-family: monospace;" id="selHash">Hash: N/A</div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px;">
+          <div class="prop-row">
+            <span class="prop-name">Position</span>
+            <span class="prop-val" id="selPos">0.0, 0.0, 0.0</span>
+          </div>
+          <div class="prop-row">
+            <span class="prop-name">Rotation Euler</span>
+            <span class="prop-val" id="selRot">0°, 0°, 0°</span>
+          </div>
+          <div class="prop-row">
+            <span class="prop-name">Archétype</span>
+            <span class="prop-val" id="selArchetype">N/A</span>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 6px; margin-top: 6px;">
+          <button class="btn-action" style="flex: 1;" onclick="send('focus_selected')">🎯 Centrer Caméra</button>
+          <button class="btn-action" style="flex: 1;" onclick="send('delete_selected')">🗑 Supprimer</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: RENDU, CIEL & COLLISIONS -->
+    <div id="tab-options" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          <span>Météo & Ambiance</span>
+        </div>
+        <select class="select-styled" id="selWeather" onchange="send('set_weather', { value: this.value })">
+          <option value="EXTRASUNNY">Extra Ensoleillé</option>
+          <option value="CLEAR">Dégagé</option>
+          <option value="CLOUDS">Nuageux</option>
+          <option value="SMOG">Smog</option>
+          <option value="FOGGY">Brumeux</option>
+          <option value="OVERCAST">Couvert</option>
+          <option value="RAIN">Pluie</option>
+          <option value="THUNDER">Orage</option>
+          <option value="BLIZZARD">Blizzard</option>
+          <option value="SNOW">Neige</option>
+          <option value="HALLOWEEN">Halloween</option>
+        </select>
+
+        <div class="slider-group" style="margin-top: 6px;">
+          <div class="slider-header">
+            <span>Heure de la journée</span>
+            <span class="slider-val" id="valTimeOfDay">12:00</span>
+          </div>
+          <input type="range" id="rngTimeOfDay" min="0" max="1439" value="720" oninput="updateTimeOfDay(this.value)" />
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>Aides Visuelles & Collisions</span>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Fil de fer (Wireframe)</span>
+          <label class="switch">
+            <input type="checkbox" id="chkWireframe" onchange="send('toggle_wireframe', { value: this.checked })" />
+            <span class="slider-switch"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Maillages Collision (YBN)</span>
+          <label class="switch">
+            <input type="checkbox" id="chkCollisions" onchange="send('toggle_collisions', { value: this.checked })" />
+            <span class="slider-switch"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Boîtes Collision (Bounds)</span>
+          <label class="switch">
+            <input type="checkbox" id="chkBounds" onchange="send('toggle_bounds', { value: this.checked })" />
+            <span class="slider-switch"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Voies & Trafic (YND)</span>
+          <label class="switch">
+            <input type="checkbox" id="chkPaths" onchange="send('toggle_paths', { value: this.checked })" />
+            <span class="slider-switch"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">NavMeshes Piétons (YNV)</span>
+          <label class="switch">
+            <input type="checkbox" id="chkNavmesh" onchange="send('toggle_navmesh', { value: this.checked })" />
+            <span class="slider-switch"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>Éclairage & Post-Processing</span>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Lumières Artificielles HD</span>
+          <label class="switch">
+            <input type="checkbox" id="chkLightsHD" checked onchange="send('toggle_hd_lights', { value: this.checked })" />
+            <span class="slider-switch"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">LOD Lights Distantes</span>
+          <label class="switch">
+            <input type="checkbox" id="chkLightsLOD" checked onchange="send('toggle_lod_lights', { value: this.checked })" />
+            <span class="slider-switch"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Ombres Portées</span>
+          <label class="switch">
+            <input type="checkbox" id="chkShadows" checked onchange="send('toggle_shadows', { value: this.checked })" />
+            <span class="slider-switch"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Occlusion Ambiante (SSAO)</span>
+          <label class="switch">
+            <input type="checkbox" id="chkSSAO" checked onchange="send('toggle_ssao', { value: this.checked })" />
+            <span class="slider-switch"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Éclat Lumineux (Bloom)</span>
+          <label class="switch">
+            <input type="checkbox" id="chkBloom" checked onchange="send('toggle_bloom', { value: this.checked })" />
+            <span class="slider-switch"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <span>FPS:</span>
+      <span class="fps-badge" id="fpsDisplay">60</span>
+    </div>
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <span id="drawStats">Géométries: 0</span>
+      <button class="btn-action" style="padding: 2px 6px; font-size: 10px;" onclick="send('gc_collect')">🧹 RAM</button>
+    </div>
+  </footer>
+
+  <div id="toast" class="toast">Action effectuée</div>
+
+  <script>
+    function send(action, data = {}) {
+      if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.postMessage({ action, ...data });
+      }
+    }
+
+    function setTab(name, btn) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+      const target = document.getElementById('tab-' + name);
+      if (target) target.classList.add('active');
+      if (btn) btn.classList.add('active');
+    }
+
+    function updateLodDist(val) {
+      const real = (val * 0.1).toFixed(1);
+      document.getElementById('valLodDist').textContent = real + 'x';
+      send('set_lod_dist', { value: parseFloat(real) });
+    }
+
+    function updateDetDist(val) {
+      const real = (val * 0.1).toFixed(1);
+      document.getElementById('valDetDist').textContent = real + 'x';
+      send('set_detail_dist', { value: parseFloat(real) });
+    }
+
+    function updateTimeOfDay(mins) {
+      const h = Math.floor(mins / 60).toString().padStart(2, '0');
+      const m = (mins % 60).toString().padStart(2, '0');
+      document.getElementById('valTimeOfDay').textContent = h + ':' + m;
+      send('set_time_of_day', { minutes: parseInt(mins) });
+    }
+
+    function teleportTo(x, y, z) {
+      document.getElementById('tpX').value = x;
+      document.getElementById('tpY').value = y;
+      document.getElementById('tpZ').value = z;
+      send('teleport', { x, y, z });
+      showToast('Téléporté à (' + x + ', ' + y + ', ' + z + ')');
+    }
+
+    function teleportCustom() {
+      const x = parseFloat(document.getElementById('tpX').value) || 0;
+      const y = parseFloat(document.getElementById('tpY').value) || 0;
+      const z = parseFloat(document.getElementById('tpZ').value) || 0;
+      send('teleport', { x, y, z });
+      showToast('Téléporté à (' + x.toFixed(0) + ', ' + y.toFixed(0) + ', ' + z.toFixed(0) + ')');
+    }
+
+    function copyCoords() {
+      const x = document.getElementById('camX').textContent;
+      const y = document.getElementById('camY').textContent;
+      const z = document.getElementById('camZ').textContent;
+      const text = x + ', ' + y + ', ' + z;
+      navigator.clipboard.writeText(text);
+      showToast('Coordonnées copiées : ' + text);
+    }
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2000);
+    }
+
+    // Message handler from C#
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.addEventListener('message', e => {
+        try {
+          const data = e.data;
+          if (data.type === 'tick') {
+            if (data.camX !== undefined) document.getElementById('camX').textContent = data.camX.toFixed(1);
+            if (data.camY !== undefined) document.getElementById('camY').textContent = data.camY.toFixed(1);
+            if (data.camZ !== undefined) document.getElementById('camZ').textContent = data.camZ.toFixed(1);
+            if (data.fps !== undefined) document.getElementById('fpsDisplay').textContent = data.fps;
+            if (data.drawn !== undefined) document.getElementById('drawStats').textContent = 'Géométries: ' + data.drawn;
+          }
+          else if (data.type === 'selection') {
+            document.getElementById('selStatusBadge').textContent = data.hasSelection ? 'Actif' : 'Aucun';
+            document.getElementById('selName').textContent = data.name || 'Rien de sélectionné';
+            document.getElementById('selHash').textContent = 'Hash: ' + (data.hash || 'N/A');
+            document.getElementById('selPos').textContent = data.pos || '0.0, 0.0, 0.0';
+            document.getElementById('selRot').textContent = data.rot || '0°, 0°, 0°';
+            document.getElementById('selArchetype').textContent = data.archetype || 'N/A';
+          }
+          else if (data.type === 'init') {
+            if (data.lodDist !== undefined) {
+              document.getElementById('rngLodDist').value = Math.round(data.lodDist * 10);
+              document.getElementById('valLodDist').textContent = data.lodDist.toFixed(1) + 'x';
+            }
+            if (data.detDist !== undefined) {
+              document.getElementById('rngDetDist').value = Math.round(data.detDist * 10);
+              document.getElementById('valDetDist').textContent = data.detDist.toFixed(1) + 'x';
+            }
+          }
+        } catch (err) {
+          console.error(err);
+        }
+      });
+      send('ui_ready');
+    }
+  </script>
+</body>
+</html>

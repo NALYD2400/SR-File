@@ -25,6 +25,7 @@ import {
   Gxt2Table,
   Gxt2SearchResult,
   ParseGxt2Request,
+  WorldStatus,
 } from "../types";
 
 let cachedBaseUrl = "http://127.0.0.1:5890";
@@ -468,6 +469,18 @@ export const api = {
 
   async buildGxt2Binary(textContent: string, entryName = "text.gxt2"): Promise<Blob> {
     return this.buildGxt2(textContent, entryName);
+  },
+
+  // World 3D
+  async getWorldStatus(): Promise<WorldStatus> {
+    return fetchSidecar<WorldStatus>("/api/world/status");
+  },
+
+  async launchWorld3D(startPosition?: string, mode?: string): Promise<{ success: boolean; pid?: number; message: string }> {
+    return fetchSidecar("/api/world/launch", {
+      method: "POST",
+      body: JSON.stringify({ startPosition, mode }),
+    });
   },
 
   // Native Tauri Dialogs

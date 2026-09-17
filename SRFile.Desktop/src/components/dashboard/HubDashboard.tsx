@@ -24,7 +24,8 @@ import {
   Gauge,
   Trash2,
   Clock,
-  Type
+  Type,
+  Compass
 } from "lucide-react";
 import { formatBytes, cn } from "../../lib/utils";
 
@@ -415,6 +416,33 @@ export const HubDashboard: React.FC<HubDashboardProps> = ({
           Modules & Outils SR File Suite
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {/* Card: Monde 3D NoClip */}
+          <div
+            onClick={() => onNavigate("world_3d")}
+            className="group p-5 rounded-xl bg-gradient-to-br from-[#121824] via-[#151D2C] to-[#1A2538] hover:border-[#FF7A29]/70 border border-[#222D42] transition-all cursor-pointer shadow-md space-y-3 relative overflow-hidden"
+          >
+            <div className="absolute top-0 right-0 w-24 h-24 bg-[#FF7A29]/10 rounded-full blur-xl pointer-events-none -mr-6 -mt-6" />
+            <div className="flex items-center justify-between relative z-10">
+              <div className="p-2.5 rounded-lg bg-[#FF7A29]/15 text-[#FF7A29] group-hover:scale-110 transition-transform">
+                <Compass className="w-5 h-5" />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#FF7A29]/20 text-[#FF7A29] font-bold">
+                  DirectX 11
+                </span>
+                <ArrowRight className="w-4 h-4 text-[#64748B] group-hover:text-[#FF7A29] transition-colors" />
+              </div>
+            </div>
+            <div className="relative z-10">
+              <h3 className="text-sm font-bold text-white group-hover:text-[#FF7A29] transition-colors">
+                Monde 3D (NoClip DirectX 11)
+              </h3>
+              <p className="text-xs text-[#94A3B8] mt-1 leading-relaxed">
+                Rendu temps réel de Los Santos, NoClip haute performance et nouveau panneau d'outils WebUI glassmorphic intégré.
+              </p>
+            </div>
+          </div>
+
           {/* Card: GXT2 Studio */}
           <div
             onClick={() => onNavigate("gxt2_studio")}

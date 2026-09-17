@@ -199,6 +199,7 @@ export interface ProjectSummary {
 
 export type ActiveView =
   | "dashboard"
+  | "world_3d"
   | "explorer"
   | "textures"
   | "audio"
@@ -211,6 +212,12 @@ export type ActiveView =
   | "crypto"
   | "project_editor"
   | "settings";
+
+export interface WorldStatus {
+  isRunning: boolean;
+  exeFound: boolean;
+  exePath: string | null;
+}
 
 export interface ParseGxt2Request {
   filePath?: string;
