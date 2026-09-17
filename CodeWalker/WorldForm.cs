@@ -8135,7 +8135,6 @@ namespace CodeWalker
         }
 
         private ToolStripButton toolsNavbarBtn = null;
-        private ToolStripButton devToolsNavbarBtn = null;
 
         private void SetupToolsNavbarButton()
         {
@@ -8168,20 +8167,6 @@ namespace CodeWalker
                         };
                         toolsNavbarBtn.Click += (s, e) => ToggleToolsPanel();
                         navbar.Items.Add(toolsNavbarBtn);
-
-                        devToolsNavbarBtn = new ToolStripButton
-                        {
-                            Text = "🔍 DevTools",
-                            ToolTipText = "Ouvrir les outils de développement WebView2 (F12)",
-                            DisplayStyle = ToolStripItemDisplayStyle.Text,
-                            Tag = "SR_NAVBAR_ACTION",
-                            Alignment = ToolStripItemAlignment.Right,
-                            Font = new System.Drawing.Font("Segoe UI", 9f, System.Drawing.FontStyle.Regular),
-                            ForeColor = SRThemeManager.SubText,
-                            Margin = new Padding(2, 0, 4, 0)
-                        };
-                        devToolsNavbarBtn.Click += (s, e) => OpenDevTools();
-                        navbar.Items.Add(devToolsNavbarBtn);
                         break;
                     }
                 }
