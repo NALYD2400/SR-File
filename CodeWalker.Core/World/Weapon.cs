@@ -1,4 +1,4 @@
-﻿using CodeWalker.GameFiles;
+using CodeWalker.GameFiles;
 using SharpDX;
 using System;
 using System.Collections.Generic;
@@ -23,6 +23,7 @@ namespace CodeWalker.World
 
         public Vector3 Position { get; set; } = Vector3.Zero;
         public Quaternion Rotation { get; set; } = Quaternion.Identity;
+        public int Tint { get; set; } = 0;
 
 
         public void Init(string name, GameFileCache gfc, bool hidef = true)
@@ -64,6 +65,7 @@ namespace CodeWalker.World
         {
             RenderEntity.SetPosition(Position);
             RenderEntity.SetOrientation(Rotation);
+            RenderEntity._CEntityDef.tintValue = (byte)Tint;
         }
 
     }

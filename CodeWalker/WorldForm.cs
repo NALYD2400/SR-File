@@ -115,6 +115,28 @@ namespace CodeWalker
         List<TracerLine> activeTracers = new List<TracerLine>();
         object tracerSyncRoot = new object();
 
+        class ActiveProjectile
+        {
+            public Vector3 Position;
+            public Vector3 Velocity;
+            public Weapon RocketWeapon;
+            public float Lifetime;
+            public bool IsRocket;
+        }
+        class ExplosionEffect
+        {
+            public Vector3 Position;
+            public float TimeRemaining;
+            public float MaxRadius;
+        }
+        List<ActiveProjectile> activeProjectiles = new List<ActiveProjectile>();
+        List<ExplosionEffect> activeExplosions = new List<ExplosionEffect>();
+        object projectileSyncRoot = new object();
+
+        List<Weapon> weaponWallEntities = new List<Weapon>();
+        object weaponWallSyncRoot = new object();
+        volatile bool isSpawningWeaponWall = false;
+
 
         bool iseditmode = false;
 
@@ -443,6 +465,7 @@ namespace CodeWalker
 
             space.AddPersistentEntity(pedEntity);
             space.AddPersistentEntity(carCameraEntity);
+            carCameraEntity.Orientation = Quaternion.LookAtLH(Vector3.Zero, Vector3.Up, Vector3.ForwardLH);
 
 
             LoadSettings();
@@ -595,6 +618,49 @@ namespace CodeWalker
                     if (activeTracers[i].TimeRemaining <= 0)
                     {
                         activeTracers.RemoveAt(i);
+                    }
+                }
+            }
+
+            lock (projectileSyncRoot)
+            {
+                for (int i = activeProjectiles.Count - 1; i >= 0; i--)
+                {
+                    var proj = activeProjectiles[i];
+                    proj.Lifetime -= elapsed;
+                    Vector3 nextProjPos = proj.Position + proj.Velocity * elapsed;
+                    Ray projRay = new Ray(proj.Position, Vector3.Normalize(proj.Velocity));
+                    float stepDist = (nextProjPos - proj.Position).Length();
+                    var pHit = space.RayIntersect(projRay, stepDist + 0.3f, collisionmeshlayers);
+                    if (pHit.Hit || proj.Lifetime <= 0)
+                    {
+                        Vector3 impactPos = pHit.Hit ? pHit.Position : nextProjPos;
+                        activeExplosions.Add(new ExplosionEffect { Position = impactPos, TimeRemaining = 0.65f, MaxRadius = 5.0f });
+                        activeProjectiles.RemoveAt(i);
+                    }
+                    else
+                    {
+                        proj.Position = nextProjPos;
+                        if (proj.RocketWeapon != null)
+                        {
+                            proj.RocketWeapon.Position = nextProjPos;
+                            Vector3 fwdR = Vector3.Normalize(proj.Velocity);
+                            Vector3 rgtR = Vector3.Normalize(Vector3.Cross(fwdR, Vector3.UnitZ));
+                            if (rgtR.LengthSquared() < 0.001f) rgtR = Vector3.UnitX;
+                            Vector3 upR = Vector3.Normalize(Vector3.Cross(rgtR, fwdR));
+                            Matrix rMtx = new Matrix(rgtR.X, rgtR.Y, rgtR.Z, 0, fwdR.X, fwdR.Y, fwdR.Z, 0, upR.X, upR.Y, upR.Z, 0, nextProjPos.X, nextProjPos.Y, nextProjPos.Z, 1);
+                            proj.RocketWeapon.Rotation = Quaternion.RotationMatrix(rMtx);
+                            proj.RocketWeapon.UpdateEntity();
+                        }
+                    }
+                }
+
+                for (int i = activeExplosions.Count - 1; i >= 0; i--)
+                {
+                    activeExplosions[i].TimeRemaining -= elapsed;
+                    if (activeExplosions[i].TimeRemaining <= 0)
+                    {
+                        activeExplosions.RemoveAt(i);
                     }
                 }
             }
@@ -2464,6 +2530,30 @@ namespace CodeWalker
             return pos.Z;
         }
 
+        private float GetPedFootOffset(Ped ped)
+        {
+            if (ped != null)
+            {
+                if (ped.Yft?.Fragment?.Drawable != null)
+                {
+                    float bbMinZ = ped.Yft.Fragment.Drawable.BoundingBoxMin.Z;
+                    if (bbMinZ < -0.3f && bbMinZ > -1.5f) return bbMinZ;
+                }
+                if (ped.Drawables != null)
+                {
+                    for (int i = 0; i < ped.Drawables.Length; i++)
+                    {
+                        var d = ped.Drawables[i];
+                        if (d != null && d.BoundingBoxMin.Z < -0.3f && d.BoundingBoxMin.Z > -1.5f)
+                        {
+                            return d.BoundingBoxMin.Z;
+                        }
+                    }
+                }
+            }
+            return -0.90f; // Default GTA V ped root-to-soles distance
+        }
+
         public void SetControlMode(WorldControlMode mode)
         {
             if (InvokeRequired)
@@ -2509,6 +2599,7 @@ namespace CodeWalker
                 if (mode == WorldControlMode.Car && activeVehicle != null)
                 {
                     carCameraEntity.Position = activeVehicle.Position + new Vector3(0, 0, 1.2f);
+                    carCameraEntity.Orientation = Quaternion.LookAtLH(Vector3.Zero, Vector3.Up, Vector3.ForwardLH);
                     camera.SetFollowEntity(carCameraEntity);
                     camera.TargetDistance = 6.0f;
                     camera.Smoothness = 15.0f;
@@ -2521,7 +2612,7 @@ namespace CodeWalker
 
                     pedEntity.Position = new Vector3(testPos.X, testPos.Y, gZ + 1.7f);
                     pedEntity.CameraEntity.Position = pedEntity.Position;
-                    pedEntity.CameraEntity.Orientation = Quaternion.Identity;
+                    pedEntity.CameraEntity.Orientation = Quaternion.LookAtLH(Vector3.Zero, Vector3.Up, Vector3.ForwardLH);
                     pedEntity.Velocity = Vector3.Zero;
                     pedEntity.EnableCollisions = false;
                     pedEntity.Enabled = false;
@@ -2530,7 +2621,7 @@ namespace CodeWalker
 
                     if (playerPed != null)
                     {
-                        playerPed.Position = new Vector3(testPos.X, testPos.Y, gZ);
+                        playerPed.Position = new Vector3(testPos.X, testPos.Y, gZ - GetPedFootOffset(playerPed));
                         playerPed.Rotation = Quaternion.RotationAxis(Vector3.UnitZ, playerPedHeading);
                         playerPed.UpdateEntity();
                     }
@@ -2569,6 +2660,7 @@ namespace CodeWalker
                 {
                     pedEntity.Enabled = false;
                     carCameraEntity.Position = activeVehicle.Position + new Vector3(0, 0, 1.2f);
+                    carCameraEntity.Orientation = Quaternion.LookAtLH(Vector3.Zero, Vector3.Up, Vector3.ForwardLH);
                     camera.SetFollowEntity(carCameraEntity);
                     camera.TargetDistance = 6.0f;
                     camera.Smoothness = 15.0f;
@@ -2583,13 +2675,13 @@ namespace CodeWalker
                     float gZ = GetGroundElevation(exitPos, 15.0f, 30.0f);
                     pedEntity.Position = new Vector3(exitPos.X, exitPos.Y, gZ + 1.7f);
                     pedEntity.CameraEntity.Position = pedEntity.Position;
-                    pedEntity.CameraEntity.Orientation = Quaternion.Identity;
+                    pedEntity.CameraEntity.Orientation = Quaternion.LookAtLH(Vector3.Zero, Vector3.Up, Vector3.ForwardLH);
                     pedEntity.Velocity = Vector3.Zero;
                     pedEntity.OnGround = true;
                     pedVerticalVelocity = 0.0f;
                     if (playerPed != null)
                     {
-                        playerPed.Position = new Vector3(exitPos.X, exitPos.Y, gZ);
+                        playerPed.Position = new Vector3(exitPos.X, exitPos.Y, gZ - GetPedFootOffset(playerPed));
                         playerPed.Rotation = Quaternion.RotationAxis(Vector3.UnitZ, vehicleHeading);
                         playerPed.UpdateEntity();
                     }
@@ -2619,6 +2711,62 @@ namespace CodeWalker
                 if (playerWeapon != null)
                 {
                     Renderer.RenderWeapon(playerWeapon);
+                }
+            }
+
+            lock (weaponWallSyncRoot)
+            {
+                if (weaponWallEntities.Count > 0)
+                {
+                    for (int wIdx = 0; wIdx < weaponWallEntities.Count; wIdx++)
+                    {
+                        var w = weaponWallEntities[wIdx];
+                        if (w != null)
+                        {
+                            Renderer.RenderWeapon(w);
+                        }
+                    }
+                }
+            }
+
+            lock (projectileSyncRoot)
+            {
+                for (int pIdx = 0; pIdx < activeProjectiles.Count; pIdx++)
+                {
+                    var proj = activeProjectiles[pIdx];
+                    if (proj.RocketWeapon != null)
+                    {
+                        Renderer.RenderWeapon(proj.RocketWeapon);
+                    }
+                }
+
+                if (activeExplosions.Count > 0)
+                {
+                    List<VertexTypePC> expLines = new List<VertexTypePC>();
+                    uint expCol = 0xFFFF5500;
+                    uint sparkCol = 0xFFFFFF55;
+                    for (int eIdx = 0; eIdx < activeExplosions.Count; eIdx++)
+                    {
+                        var exp = activeExplosions[eIdx];
+                        float progress = Math.Max(0.0f, Math.Min(1.0f, 1.0f - (exp.TimeRemaining / 0.65f)));
+                        float r = exp.MaxRadius * (float)Math.Sin(progress * Math.PI * 0.5);
+                        int segs = 14;
+                        for (int s = 0; s < segs; s++)
+                        {
+                            float a1 = (float)(s * Math.PI * 2.0 / segs);
+                            float a2 = (float)((s + 1) * Math.PI * 2.0 / segs);
+                            expLines.Add(new VertexTypePC { Position = exp.Position + new Vector3((float)Math.Cos(a1) * r, (float)Math.Sin(a1) * r, 0.2f), Colour = expCol });
+                            expLines.Add(new VertexTypePC { Position = exp.Position + new Vector3((float)Math.Cos(a2) * r, (float)Math.Sin(a2) * r, 0.2f), Colour = expCol });
+                            expLines.Add(new VertexTypePC { Position = exp.Position + new Vector3((float)Math.Cos(a1) * r, 0, (float)Math.Sin(a1) * r), Colour = sparkCol });
+                            expLines.Add(new VertexTypePC { Position = exp.Position + new Vector3((float)Math.Cos(a2) * r, 0, (float)Math.Sin(a2) * r), Colour = sparkCol });
+                            expLines.Add(new VertexTypePC { Position = exp.Position + new Vector3(0, (float)Math.Cos(a1) * r, (float)Math.Sin(a1) * r), Colour = expCol });
+                            expLines.Add(new VertexTypePC { Position = exp.Position + new Vector3(0, (float)Math.Cos(a2) * r, (float)Math.Sin(a2) * r), Colour = expCol });
+                        }
+                    }
+                    if (expLines.Count > 0)
+                    {
+                        Renderer.RenderLines(expLines);
+                    }
                 }
             }
 
@@ -2729,8 +2877,8 @@ namespace CodeWalker
             if (haveGround)
             {
                 // Ground elevation at current (pre-move) position
-                float curGroundZ = GetGroundElevation(pedEntity.Position, 25.0f, 60.0f);
-                bool isBuried = currentFeetZ < curGroundZ - 0.05f;
+                float curGroundZ = GetGroundElevation(new Vector3(pedEntity.Position.X, pedEntity.Position.Y, currentFeetZ + 0.5f), 25.0f, 60.0f);
+                bool isBuried = (curGroundZ != currentFeetZ + 0.5f) && (currentFeetZ < curGroundZ - 0.05f);
 
                 if (isBuried)
                 {
@@ -2805,7 +2953,7 @@ namespace CodeWalker
 
             pedEntity.Position = nextPos;
             pedEntity.CameraEntity.Position = nextPos;
-            pedEntity.CameraEntity.Orientation = Quaternion.Identity;
+            pedEntity.CameraEntity.Orientation = Quaternion.LookAtLH(Vector3.Zero, Vector3.Up, Vector3.ForwardLH);
             pedEntity.Velocity = new Vector3(horizDisp.X / Math.Max(elapsed, 0.001f), horizDisp.Y / Math.Max(elapsed, 0.001f), pedVerticalVelocity);
             pedEntity.ControlMovement = Vector2.Zero;
             pedEntity.Enabled = false;
@@ -2813,14 +2961,15 @@ namespace CodeWalker
 
             if (playerPed != null)
             {
-                playerPed.Position = pedEntity.Position - new Vector3(0, 0, 1.7f);
+                float footOffset = GetPedFootOffset(playerPed);
+                playerPed.Position = new Vector3(pedEntity.Position.X, pedEntity.Position.Y, (pedEntity.Position.Z - 1.7f) - footOffset);
 
                 float actualSpeed = new Vector2(horizDisp.X, horizDisp.Y).Length() / Math.Max(elapsed, 0.001f);
                 if (actualSpeed > 0.1f && wishDir.LengthSquared() > 0.001f)
                 {
                     playerPedHeading = (float)Math.Atan2(wishDir.Y, wishDir.X) - (float)(Math.PI / 2.0);
                 }
-                else if (firePressed)
+                else if (firePressed || playerWeapon != null)
                 {
                     playerPedHeading = (float)Math.Atan2(fwdxy.Y, fwdxy.X) - (float)(Math.PI / 2.0);
                 }
@@ -2843,20 +2992,30 @@ namespace CodeWalker
 
                 if (playerWeapon != null)
                 {
-                    Bone rHandBone = null;
-                    if (playerPed.Skeleton?.BonesMap != null && playerPed.Skeleton.BonesMap.TryGetValue((ushort)0x6F06, out rHandBone))
-                    {
-                        Matrix worldMtx = rHandBone.AnimTransform * Matrix.RotationQuaternion(playerPed.Rotation) * Matrix.Translation(playerPed.Position);
-                        playerWeapon.Position = worldMtx.TranslationVector;
-                        playerWeapon.Rotation = Quaternion.RotationMatrix(worldMtx);
-                    }
-                    else
-                    {
-                        Vector3 fwdPed = playerPed.Rotation.Multiply(Vector3.UnitY);
-                        Vector3 rgtPed = playerPed.Rotation.Multiply(Vector3.UnitX);
-                        playerWeapon.Position = playerPed.Position + fwdPed * 0.35f + rgtPed * 0.25f + Vector3.UnitZ * 1.15f;
-                        playerWeapon.Rotation = playerPed.Rotation;
-                    }
+                    Vector3 aimDir = camera.ViewDirection;
+                    Vector3 fwdAim2D = new Vector3(aimDir.X, aimDir.Y, 0);
+                    if (fwdAim2D.LengthSquared() > 0.001f) fwdAim2D = Vector3.Normalize(fwdAim2D);
+                    else fwdAim2D = Vector3.UnitY;
+                    Vector3 rgtAim2D = new Vector3(fwdAim2D.Y, -fwdAim2D.X, 0);
+
+                    // Position weapon comfortably at the right shoulder/chest
+                    Vector3 chestPos = playerPed.Position + Vector3.UnitZ * 1.15f;
+                    Vector3 weaponHoldPos = chestPos + rgtAim2D * 0.22f + fwdAim2D * 0.32f - Vector3.UnitZ * 0.05f;
+
+                    // Orient weapon towards aimDir: +Y along aimDir, +Z up, +X right
+                    Vector3 fwdAim = Vector3.Normalize(aimDir);
+                    Vector3 rgtAim = Vector3.Normalize(Vector3.Cross(fwdAim, Vector3.UnitZ));
+                    if (rgtAim.LengthSquared() < 0.001f) rgtAim = rgtAim2D;
+                    Vector3 upAim = Vector3.Normalize(Vector3.Cross(rgtAim, fwdAim));
+
+                    Matrix weaponMtx = new Matrix(
+                        rgtAim.X, rgtAim.Y, rgtAim.Z, 0,
+                        fwdAim.X, fwdAim.Y, fwdAim.Z, 0,
+                        upAim.X, upAim.Y, upAim.Z, 0,
+                        weaponHoldPos.X, weaponHoldPos.Y, weaponHoldPos.Z, 1
+                    );
+                    playerWeapon.Position = weaponHoldPos;
+                    playerWeapon.Rotation = Quaternion.RotationMatrix(weaponMtx);
                     playerWeapon.UpdateEntity();
                 }
             }
@@ -3043,11 +3202,16 @@ namespace CodeWalker
             float roll = Vector3.Dot(upVec, rgt) * 0.6f;
             Quaternion tiltRot = Quaternion.RotationAxis(Vector3.UnitX, pitch) * Quaternion.RotationAxis(Vector3.UnitY, roll);
 
+            float wheelRadius = 0.35f;
+            activeVehicle.WheelRotation += (vehicleSpeed * elapsed) / wheelRadius;
+            activeVehicle.SteerAngle = -steer * 0.55f;
+
             activeVehicle.Position = nextPos;
             activeVehicle.Rotation = Quaternion.Multiply(yawRot, tiltRot);
             activeVehicle.UpdateEntity();
 
             carCameraEntity.Position = activeVehicle.Position + new Vector3(0, 0, 1.4f);
+            carCameraEntity.Orientation = Quaternion.LookAtLH(Vector3.Zero, Vector3.Up, Vector3.ForwardLH);
         }
 
         private void ShootActiveWeapon()
@@ -3056,9 +3220,58 @@ namespace CodeWalker
             var hit = space.RayIntersect(ray, 1000.0f, collisionmeshlayers);
 
             Vector3 startPos = playerWeapon != null ? playerWeapon.Position : camera.Position;
-            Vector3 targetPos = hit.Hit ? hit.Position : (camera.Position + camera.ViewDirection * 200.0f);
+            Vector3 targetPos = hit.Hit ? hit.Position : (camera.Position + camera.ViewDirection * 250.0f);
 
-            AddTracerLine(startPos, targetPos);
+            bool isRocketLauncher = playerWeapon != null && (
+                playerWeapon.Name.IndexOf("rpg", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                playerWeapon.Name.IndexOf("homing", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                playerWeapon.Name.IndexOf("firework", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                playerWeapon.Name.IndexOf("launcher", StringComparison.OrdinalIgnoreCase) >= 0
+            );
+
+            if (isRocketLauncher)
+            {
+                Task.Run(() =>
+                {
+                    Weapon rocket = new Weapon();
+                    rocket.Init("w_lr_rpg_rocket", gameFileCache);
+                    Vector3 rocketDir = Vector3.Normalize(targetPos - startPos);
+                    float rocketSpeed = 65.0f;
+                    lock (projectileSyncRoot)
+                    {
+                        activeProjectiles.Add(new ActiveProjectile
+                        {
+                            Position = startPos + rocketDir * 0.8f,
+                            Velocity = rocketDir * rocketSpeed,
+                            RocketWeapon = rocket,
+                            Lifetime = 6.0f,
+                            IsRocket = true
+                        });
+                    }
+                });
+            }
+            else
+            {
+                AddTracerLine(startPos, targetPos);
+                if (hit.Hit)
+                {
+                    AddImpactSparks(hit.Position, hit.Normal);
+                }
+            }
+        }
+
+        private void AddImpactSparks(Vector3 pos, Vector3 norm)
+        {
+            lock (tracerSyncRoot)
+            {
+                Vector3 up = (Math.Abs(norm.Z) < 0.9f) ? Vector3.UnitZ : Vector3.UnitX;
+                Vector3 t1 = Vector3.Normalize(Vector3.Cross(norm, up));
+                Vector3 t2 = Vector3.Normalize(Vector3.Cross(norm, t1));
+                activeTracers.Add(new TracerLine { Start = pos, End = pos + (norm + t1) * 0.35f, TimeRemaining = 0.12f });
+                activeTracers.Add(new TracerLine { Start = pos, End = pos + (norm - t1) * 0.35f, TimeRemaining = 0.12f });
+                activeTracers.Add(new TracerLine { Start = pos, End = pos + (norm + t2) * 0.35f, TimeRemaining = 0.12f });
+                activeTracers.Add(new TracerLine { Start = pos, End = pos + (norm - t2) * 0.35f, TimeRemaining = 0.12f });
+            }
         }
 
         private void AddTracerLine(Vector3 start, Vector3 end)
@@ -3139,14 +3352,15 @@ namespace CodeWalker
 
                 pedEntity.Position = new Vector3(spawnRef.X, spawnRef.Y, groundZ + 1.7f);
                 pedEntity.CameraEntity.Position = pedEntity.Position;
-                pedEntity.CameraEntity.Orientation = Quaternion.Identity;
+                pedEntity.CameraEntity.Orientation = Quaternion.LookAtLH(Vector3.Zero, Vector3.Up, Vector3.ForwardLH);
                 pedEntity.Velocity = Vector3.Zero;
                 pedEntity.EnableCollisions = false;
                 pedEntity.Enabled = false;
                 pedEntity.OnGround = true;
                 pedVerticalVelocity = 0.0f;
 
-                newPed.Position = new Vector3(spawnRef.X, spawnRef.Y, groundZ);
+                float footOffset = GetPedFootOffset(newPed);
+                newPed.Position = new Vector3(spawnRef.X, spawnRef.Y, groundZ - footOffset);
                 newPed.Rotation = Quaternion.RotationAxis(Vector3.UnitZ, playerPedHeading);
                 newPed.UpdateEntity();
 
@@ -3259,6 +3473,97 @@ namespace CodeWalker
             finally
             {
                 isSpawningVehicle = false;
+            }
+        }
+
+        public void SpawnWeaponWall()
+        {
+            if (isSpawningWeaponWall) return;
+            isSpawningWeaponWall = true;
+            try
+            {
+                Vector3 playerPos = (playerPed != null) ? playerPed.Position : ((ControlMode == WorldControlMode.Ped) ? pedEntity.Position : camEntity.Position);
+                Vector3 fwd = camera.ViewDirection;
+                fwd.Z = 0;
+                if (fwd.LengthSquared() < 0.001f) fwd = Vector3.UnitY;
+                fwd = Vector3.Normalize(fwd);
+                Vector3 rgt = new Vector3(fwd.Y, -fwd.X, 0);
+
+                Vector3 wallCenter = playerPos + fwd * 3.2f + Vector3.UnitZ * 0.85f;
+
+                string[][] weaponRows = new string[][]
+                {
+                    new string[] { "w_me_knife_01", "w_me_bat", "w_me_crowbar", "w_me_hatchet", "w_ex_grenadefrag", "w_ex_molotov" },
+                    new string[] { "w_pi_pistol", "w_pi_combatpistol", "w_pi_appistol", "w_pi_pistol50", "w_pi_heavypistol", "w_pi_vintage_pistol", "w_pi_snspistol", "w_pi_flaregun", "w_pi_revolver" },
+                    new string[] { "w_sb_microsmg", "w_sb_smg", "w_sb_assaultsmg", "w_sg_pumpshotgun", "w_sg_sawnoff", "w_sg_assaultshotgun", "w_sg_bullpupshotgun" },
+                    new string[] { "w_ar_assaultrifle", "w_ar_carbinerifle", "w_ar_advancedrifle", "w_ar_specialcarbine", "w_ar_bullpuprifle", "w_sr_sniperrifle", "w_sr_heavysniper", "w_sr_marksmanrifle" },
+                    new string[] { "w_mg_mg", "w_mg_combatmg", "w_mg_minigun", "w_lr_rpg", "w_lr_homing", "w_lr_firework" }
+                };
+
+                List<Weapon> spawned = new List<Weapon>();
+
+                Matrix wallWeaponRotMtx = new Matrix(
+                    -fwd.X, -fwd.Y, -fwd.Z, 0,
+                    rgt.X, rgt.Y, rgt.Z, 0,
+                    0, 0, 1.0f, 0,
+                    0, 0, 0, 1.0f
+                );
+                Quaternion wallWeaponRot = Quaternion.RotationMatrix(wallWeaponRotMtx);
+
+                float rowSpacing = 0.52f;
+                float colSpacing = 0.62f;
+
+                for (int r = 0; r < weaponRows.Length; r++)
+                {
+                    string[] row = weaponRows[r];
+                    float rowZ = (r - (weaponRows.Length - 1) * 0.5f) * rowSpacing;
+                    float rowWidth = (row.Length - 1) * colSpacing;
+                    for (int c = 0; c < row.Length; c++)
+                    {
+                        float colOffset = (c * colSpacing) - (rowWidth * 0.5f);
+                        Vector3 wPos = wallCenter + rgt * colOffset + Vector3.UnitZ * rowZ;
+
+                        Weapon w = new Weapon();
+                        w.Init(row[c], gameFileCache);
+                        w.Position = wPos;
+                        w.Rotation = wallWeaponRot;
+                        w.UpdateEntity();
+                        spawned.Add(w);
+                    }
+                }
+
+                lock (weaponWallSyncRoot)
+                {
+                    weaponWallEntities = spawned;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("SpawnWeaponWall error: " + ex.Message);
+            }
+            finally
+            {
+                isSpawningWeaponWall = false;
+            }
+        }
+
+        public void DespawnWeaponWall()
+        {
+            lock (weaponWallSyncRoot)
+            {
+                weaponWallEntities.Clear();
+            }
+        }
+
+        public void SetPlayerWeaponTint(int tint)
+        {
+            lock (Renderer.RenderSyncRoot)
+            {
+                if (playerWeapon != null)
+                {
+                    playerWeapon.Tint = tint;
+                    playerWeapon.UpdateEntity();
+                }
             }
         }
 
@@ -9408,13 +9713,16 @@ namespace CodeWalker
                 }
                 else if (json.Contains("\"set_weather\""))
                 {
-                    var match = System.Text.RegularExpressions.Regex.Match(json, "\"weather\":\\s*\"([^\"]+)\"");
+                    var match = System.Text.RegularExpressions.Regex.Match(json, "\"(?:weather|value)\":\\s*\"([^\"]+)\"");
                     if (match.Success)
                     {
-                        string wth = match.Groups[1].Value;
+                        string wth = match.Groups[1].Value.Trim();
                         this.BeginInvoke(new Action(() => {
                             Renderer.SetWeatherType(wth);
-                            WeatherComboBox.SelectedItem = wth;
+                            if (WeatherComboBox.FindStringExact(wth) >= 0)
+                                WeatherComboBox.SelectedItem = wth;
+                            else
+                                WeatherComboBox.Text = wth;
                         }));
                     }
                 }
@@ -9609,6 +9917,22 @@ namespace CodeWalker
                     lock (Renderer.RenderSyncRoot)
                     {
                         playerWeapon = null;
+                    }
+                }
+                else if (json.Contains("\"spawn_weapon_wall\""))
+                {
+                    Task.Run(() => SpawnWeaponWall());
+                }
+                else if (json.Contains("\"despawn_weapon_wall\""))
+                {
+                    DespawnWeaponWall();
+                }
+                else if (json.Contains("\"set_weapon_tint\""))
+                {
+                    var match = System.Text.RegularExpressions.Regex.Match(json, "\"tint\":\\s*([0-9]+)");
+                    if (match.Success && int.TryParse(match.Groups[1].Value, out int tint))
+                    {
+                        SetPlayerWeaponTint(tint);
                     }
                 }
                 else if (json.Contains("\"spawn_vehicle\""))

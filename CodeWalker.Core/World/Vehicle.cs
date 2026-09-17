@@ -1,4 +1,4 @@
-﻿using CodeWalker.GameFiles;
+using CodeWalker.GameFiles;
 using SharpDX;
 using System;
 using System.Collections.Generic;
@@ -29,6 +29,8 @@ namespace CodeWalker.World
 
         public Vector3 Position { get; set; } = Vector3.Zero;
         public Quaternion Rotation { get; set; } = Quaternion.Identity;
+        public float WheelRotation { get; set; } = 0.0f;
+        public float SteerAngle { get; set; } = 0.0f;
 
 
         public void Init(string name, GameFileCache gfc, bool hidef = true)

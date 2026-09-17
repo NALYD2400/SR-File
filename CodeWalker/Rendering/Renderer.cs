@@ -349,11 +349,18 @@ namespace CodeWalker.Rendering
 
         public void SetWeatherType(string name)
         {
-            if (!Monitor.TryEnter(rendersyncroot, 50))
-            { return; } //couldn't get a lock...
-            weathertype = name;
-            weather.SetNextWeather(weathertype);
-            Monitor.Exit(rendersyncroot);
+            lock (rendersyncroot)
+            {
+                weathertype = name;
+                weather.SetNextWeather(weathertype);
+                if (weather.NextWeatherType != null)
+                {
+                    weather.CurrentWeatherType = weather.NextWeatherType;
+                    weather.CurrentWeatherChangeBlend = 1.0f;
+                    weather.CurrentWeatherChangeTime = weather.WeatherChangeTime;
+                }
+                weather.Update(0.1f);
+            }
         }
 
         public void SetCameraMode(string modestr)
@@ -2799,7 +2806,7 @@ namespace CodeWalker.Rendering
 
 
 
-        public bool RenderFragment(Archetype arch, YmapEntityDef ent, FragType f, uint txdhash = 0, ClipMapEntry animClip = null)
+        public bool RenderFragment(Archetype arch, YmapEntityDef ent, FragType f, uint txdhash = 0, ClipMapEntry animClip = null, Vehicle vehicle = null)
         {
 
             RenderDrawable(f.Drawable, arch, ent, txdhash, null, null, animClip);
@@ -2927,6 +2934,52 @@ namespace CodeWalker.Rendering
                                         //dwbl.DrawableModelsLow = dwblcopy.DrawableModelsLow;
                                         //dwbl.DrawableModelsVeryLow = dwblcopy.DrawableModelsVeryLow;
                                         //dwbl.VertexDecls = dwblcopy.VertexDecls;
+                                    }
+
+                                    if (vehicle != null && pl1.FragTransforms?.Matrices != null && pch.OwnerFragPhysIndex < pl1.FragTransforms.Matrices.Length)
+                                    {
+                                        Renderable rndbl = TryGetRenderable(arch, dwbl, txdhash, null, null);
+                                        if (rndbl?.AllModels != null)
+                                        {
+                                            Matrix baseTrans = pl1.FragTransforms.Matrices[pch.OwnerFragPhysIndex];
+                                            Vector4 fragoffset = new Vector4(pl1.PositionOffset, 0.0f);
+                                            baseTrans.Row4 += fragoffset;
+
+                                            Vector4 pos = baseTrans.Row4;
+                                            Matrix baseRot = baseTrans;
+                                            baseRot.Row4 = new Vector4(0, 0, 0, 1.0f);
+
+                                            Matrix spinSteer;
+                                            if (pch.BoneTag == 27922) // wheel_lf
+                                            {
+                                                spinSteer = Matrix.RotationX(vehicle.WheelRotation) * Matrix.RotationZ(vehicle.SteerAngle);
+                                            }
+                                            else if (pch.BoneTag == 26418) // wheel_rf
+                                            {
+                                                spinSteer = Matrix.RotationX(-vehicle.WheelRotation) * Matrix.RotationZ(vehicle.SteerAngle);
+                                            }
+                                            else if (pch.BoneTag == 27902 || pch.BoneTag == 29921 || pch.BoneTag == 29922 || pch.BoneTag == 29923) // wheel_lr / mid left
+                                            {
+                                                spinSteer = Matrix.RotationX(vehicle.WheelRotation);
+                                            }
+                                            else if (pch.BoneTag == 26398 || pch.BoneTag == 5857 || pch.BoneTag == 5858 || pch.BoneTag == 5859) // wheel_rr / mid right
+                                            {
+                                                spinSteer = Matrix.RotationX(-vehicle.WheelRotation);
+                                            }
+                                            else
+                                            {
+                                                spinSteer = Matrix.Identity;
+                                            }
+
+                                            Matrix wheelMtx = spinSteer * baseRot;
+                                            wheelMtx.Row4 = pos;
+
+                                            for (int mIdx = 0; mIdx < rndbl.AllModels.Length; mIdx++)
+                                            {
+                                                rndbl.AllModels[mIdx].UseTransform = true;
+                                                rndbl.AllModels[mIdx].Transform = wheelMtx;
+                                            }
+                                        }
                                     }
 
                                     RenderDrawable(dwbl, arch, ent, txdhash /*, null, null, animClip*/);
@@ -3459,7 +3512,7 @@ namespace CodeWalker.Rendering
                 var f = yft.Fragment;
                 var txdhash = vehicle.NameHash;
 
-                RenderFragment(null, vehicle.RenderEntity, f, txdhash, animClip);
+                RenderFragment(null, vehicle.RenderEntity, f, txdhash, animClip, vehicle);
 
             }
 

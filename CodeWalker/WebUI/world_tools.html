@@ -720,7 +720,7 @@
         <div class="card-title">
           <span>Météo & Ambiance</span>
         </div>
-        <select class="select-styled" id="selWeather" onchange="send('set_weather', { value: this.value })">
+        <select class="select-styled" id="selWeather" onchange="send('set_weather', { weather: this.value, value: this.value })">
           <option value="EXTRASUNNY">Extra Ensoleillé</option>
           <option value="CLEAR">Dégagé</option>
           <option value="CLOUDS">Nuageux</option>
@@ -871,24 +871,66 @@
         </div>
       </div>
 
-      <!-- Section Armes -->
+      <!-- Section Armes & Arsenal -->
       <div class="card">
         <div class="card-title">
           <span>Arsenal & Armes</span>
           <span class="badge" id="lblActiveWeapon" style="background: rgba(52, 152, 219, 0.2); color: #3498db;">Aucune</span>
         </div>
         <div class="poi-grid">
-          <button class="poi-btn" onclick="giveWeapon('w_pi_combatpistol')">🔫 Combat Pistol</button>
-          <button class="poi-btn" onclick="giveWeapon('w_ar_assaultrifle')">💥 Assault Rifle</button>
-          <button class="poi-btn" onclick="giveWeapon('w_ar_carbinerifle')">⚡ Carabine</button>
-          <button class="poi-btn" onclick="giveWeapon('w_sg_pumpshotgun')">🛑 Shotgun</button>
-          <button class="poi-btn" onclick="giveWeapon('w_sr_sniperrifle')">🎯 Sniper</button>
-          <button class="poi-btn" onclick="giveWeapon('w_lr_rpg')">🚀 Lance-roquettes</button>
+          <button class="poi-btn" onclick="giveWeapon('w_pi_combatpistol')">🔫 Pistol Combat</button>
+          <button class="poi-btn" onclick="giveWeapon('w_pi_appistol')">⚡ AP Pistol</button>
+          <button class="poi-btn" onclick="giveWeapon('w_sb_microsmg')">💥 Micro SMG</button>
+          <button class="poi-btn" onclick="giveWeapon('w_ar_assaultrifle')">🪖 AK-47</button>
+          <button class="poi-btn" onclick="giveWeapon('w_ar_carbinerifle')">⚡ Carabine M4</button>
+          <button class="poi-btn" onclick="giveWeapon('w_ar_specialcarbine')">🔥 G36C Spécial</button>
+          <button class="poi-btn" onclick="giveWeapon('w_sg_pumpshotgun')">🛑 Pompage</button>
+          <button class="poi-btn" onclick="giveWeapon('w_sr_heavysniper')">🎯 Heavy Sniper</button>
+          <button class="poi-btn" onclick="giveWeapon('w_mg_minigun')">⚙️ Minigun</button>
+          <button class="poi-btn" onclick="giveWeapon('w_lr_rpg')">🚀 RPG Roquette</button>
+          <button class="poi-btn" onclick="giveWeapon('w_lr_homing')">📡 Homing Missile</button>
+          <button class="poi-btn" onclick="giveWeapon('w_me_knife_01')">🗡️ Couteau</button>
         </div>
         <div style="display: flex; gap: 6px; margin-top: 4px;">
-          <input type="text" id="txtCustomWeapon" placeholder="Nom arme (ex: w_sb_microsmg)" style="flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; color: var(--text); font-size: 11px;" />
+          <input type="text" id="txtCustomWeapon" placeholder="Nom arme (ex: w_sb_smg, w_mg_mg)" style="flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; color: var(--text); font-size: 11px;" />
           <button class="btn-action" onclick="giveCustomWeapon()" style="padding: 6px 10px;">Équiper</button>
           <button class="btn-action" onclick="send('remove_weapon')" style="color: #e74c3c; border-color: rgba(231,76,60,0.4); padding: 6px 10px;">Désarmer</button>
+        </div>
+      </div>
+
+      <!-- Section Mur d'Armes 3D & Customisation -->
+      <div class="card" style="border-left: 3px solid var(--accent);">
+        <div class="card-title">
+          <span>🛡️ Mur d'Armes 3D (Mapping Armurerie)</span>
+          <span class="badge" style="background: rgba(255, 122, 41, 0.2); color: var(--accent);">3D Rack</span>
+        </div>
+        <div style="font-size: 11px; color: var(--subtext); margin-bottom: 6px; line-height: 1.4;">
+          Fait apparaître un mur d'exposition avec tout l'arsenal du jeu disposé en rack 3D face à vous.
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn-accent" style="flex: 1;" onclick="send('spawn_weapon_wall'); showToast('Mur d\'armes 3D généré !');">
+            🎯 Faire Apparaître le Mur 3D
+          </button>
+          <button class="btn-action" style="padding: 6px 12px; color: #e74c3c; border-color: rgba(231,76,60,0.4);" onclick="send('despawn_weapon_wall'); showToast('Mur d\'armes retiré');">
+            🧹 Retirer
+          </button>
+        </div>
+
+        <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);">
+          <div style="font-size: 11px; font-weight: 700; margin-bottom: 4px; display: flex; justify-content: space-between;">
+            <span>🎨 Personnalisation / Teinte (Skin)</span>
+            <span id="lblTintName" style="color: var(--accent); font-size: 10px;">Métal (Défaut)</span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;">
+            <button class="poi-btn" style="padding: 4px 6px; font-size: 10px;" onclick="setTint(0, 'Métal')">⚫ Métal</button>
+            <button class="poi-btn" style="padding: 4px 6px; font-size: 10px;" onclick="setTint(1, 'Vert Armée')">🟢 Vert</button>
+            <button class="poi-btn" style="padding: 4px 6px; font-size: 10px;" onclick="setTint(2, 'Or Luxueux')">🟡 Or Lux</button>
+            <button class="poi-btn" style="padding: 4px 6px; font-size: 10px;" onclick="setTint(3, 'Rose Pastel')">🌸 Rose</button>
+            <button class="poi-btn" style="padding: 4px 6px; font-size: 10px;" onclick="setTint(4, 'Camouflage')">🪖 Camo</button>
+            <button class="poi-btn" style="padding: 4px 6px; font-size: 10px;" onclick="setTint(5, 'Police LSPD')">🔵 LSPD</button>
+            <button class="poi-btn" style="padding: 4px 6px; font-size: 10px;" onclick="setTint(6, 'Orange Tactique')">🟠 Orange</button>
+            <button class="poi-btn" style="padding: 4px 6px; font-size: 10px;" onclick="setTint(7, 'Platine Chrome')">⚪ Platine</button>
+          </div>
         </div>
       </div>
 
@@ -1023,6 +1065,12 @@
     function giveCustomWeapon() {
       const w = document.getElementById('txtCustomWeapon').value.trim();
       if (w) giveWeapon(w);
+    }
+    function setTint(tint, name) {
+      send('set_weapon_tint', { tint: tint });
+      const lbl = document.getElementById('lblTintName');
+      if (lbl) lbl.textContent = name;
+      showToast('Teinte appliquée : ' + name);
     }
     function spawnVehicle(model, enter = true) {
       send('spawn_vehicle', { model, enter });
