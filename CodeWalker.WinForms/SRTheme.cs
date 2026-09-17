@@ -845,6 +845,11 @@ namespace CodeWalker.WinForms
             }
             catch { }
 
+            if (navToolStrip == null)
+            {
+                navToolStrip = FindPrimaryToolStrip(form);
+            }
+
             if (navToolStrip != null)
             {
                 InjectNavbarControls(navToolStrip, form);
@@ -882,9 +887,42 @@ namespace CodeWalker.WinForms
             form.FormClosed += (s, e) => { ThemeChanged -= syncHandler; };
         }
 
+        private static ToolStrip FindPrimaryToolStrip(Control parent)
+        {
+            if (parent == null) return null;
+
+            foreach (Control c in parent.Controls)
+            {
+                if (c is ToolStrip ts && !(c is StatusStrip) && (ts.Dock == DockStyle.Top || c is MenuStrip))
+                {
+                    return ts;
+                }
+            }
+
+            foreach (Control c in parent.Controls)
+            {
+                if (c is ToolStrip ts && !(c is StatusStrip))
+                {
+                    return ts;
+                }
+            }
+
+            foreach (Control c in parent.Controls)
+            {
+                if (c is Panel || c is ToolStripContainer || c is SplitContainer || c is GroupBox)
+                {
+                    var found = FindPrimaryToolStrip(c);
+                    if (found != null) return found;
+                }
+            }
+
+            return null;
+        }
+
         public static void InjectNavbarControls(ToolStrip toolStrip, Form parentForm, Action openSettingsAction = null)
         {
             if (toolStrip == null) return;
+            try { toolStrip.CanOverflow = true; } catch { }
 
             for (int i = toolStrip.Items.Count - 1; i >= 0; i--)
             {
@@ -895,9 +933,42 @@ namespace CodeWalker.WinForms
                 }
             }
 
-            var sep = new ToolStripSeparator { Tag = "SR_NAVBAR_ITEM", Alignment = ToolStripItemAlignment.Right };
-            toolStrip.Items.Add(sep);
+            // --- LEFT: SR Ribbon Logo & Brand ---
+            Image logoImg = null;
+            try { logoImg = SRLogo.GetLogoImage(18); } catch { }
 
+            var logoItem = new ToolStripLabel
+            {
+                Image = logoImg,
+                DisplayStyle = ToolStripItemDisplayStyle.Image,
+                Tag = "SR_NAVBAR_ITEM",
+                ToolTipText = "SR File - Grand Theft Auto V Suite",
+                Margin = new Padding(3, 1, 2, 1)
+            };
+
+            var titleItem = new ToolStripLabel
+            {
+                Text = "SR FILE",
+                ForeColor = AccentColor,
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                Tag = "SR_NAVBAR_ITEM",
+                Margin = new Padding(0, 1, 4, 1),
+                ToolTipText = "SR File"
+            };
+
+            var leftSep = new ToolStripSeparator
+            {
+                Tag = "SR_NAVBAR_ITEM",
+                Margin = new Padding(2, 0, 4, 0)
+            };
+
+            toolStrip.Items.Insert(0, leftSep);
+            toolStrip.Items.Insert(0, titleItem);
+            toolStrip.Items.Insert(0, logoItem);
+
+            // --- RIGHT: Settings, Separator, Refresh, Separator, DarkMode ---
+            // WinForms Alignment=Right stacks from right edge inward in addition order:
+            // 1. Settings button (farthest right)
             var settingsBtn = new ToolStripButton
             {
                 Text = "⚙ Réglages",
@@ -905,7 +976,8 @@ namespace CodeWalker.WinForms
                 DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
                 Tag = "SR_NAVBAR_ITEM",
                 Alignment = ToolStripItemAlignment.Right,
-                Font = new Font(toolStrip.Font, FontStyle.Bold)
+                Font = new Font(toolStrip.Font, FontStyle.Bold),
+                ForeColor = Text
             };
             try
             {
@@ -929,6 +1001,64 @@ namespace CodeWalker.WinForms
             };
             toolStrip.Items.Add(settingsBtn);
 
+            // 2. Separator between Settings and Refresh
+            var sepSettings = new ToolStripSeparator
+            {
+                Tag = "SR_NAVBAR_ITEM",
+                Alignment = ToolStripItemAlignment.Right,
+                Margin = new Padding(2, 0, 2, 0)
+            };
+            toolStrip.Items.Add(sepSettings);
+
+            // 3. Refresh button
+            var refreshBtn = new ToolStripButton
+            {
+                Text = "🔄 Actualiser",
+                ToolTipText = "Actualiser l'affichage et recharger les données",
+                DisplayStyle = ToolStripItemDisplayStyle.Text,
+                Tag = "SR_NAVBAR_ITEM",
+                Alignment = ToolStripItemAlignment.Right,
+                Font = new Font(toolStrip.Font, FontStyle.Bold),
+                ForeColor = Text
+            };
+            refreshBtn.Click += (s, e) =>
+            {
+                try
+                {
+                    var refreshProp = parentForm?.GetType().GetField("RefreshButton", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    if (refreshProp?.GetValue(parentForm) is ToolStripButton tb)
+                    {
+                        tb.PerformClick();
+                    }
+                    else if (refreshProp?.GetValue(parentForm) is Button b)
+                    {
+                        b.PerformClick();
+                    }
+
+                    var m = parentForm?.GetType().GetMethod("RefreshView", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                         ?? parentForm?.GetType().GetMethod("Reload", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                         ?? parentForm?.GetType().GetMethod("RefreshData", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                    m?.Invoke(parentForm, null);
+
+                    ApplyTheme(parentForm);
+                    parentForm?.Invalidate(true);
+                    parentForm?.Update();
+                    parentForm?.Refresh();
+                }
+                catch { }
+            };
+            toolStrip.Items.Add(refreshBtn);
+
+            // 4. Separator between Refresh and Theme
+            var sepRefresh = new ToolStripSeparator
+            {
+                Tag = "SR_NAVBAR_ITEM",
+                Alignment = ToolStripItemAlignment.Right,
+                Margin = new Padding(2, 0, 2, 0)
+            };
+            toolStrip.Items.Add(sepRefresh);
+
+            // 5. Dark Mode button
             var themeBtn = new ToolStripButton
             {
                 Text = IsDarkMode ? "🌙 Sombre" : "☀️ Clair",
@@ -936,7 +1066,8 @@ namespace CodeWalker.WinForms
                 DisplayStyle = ToolStripItemDisplayStyle.Text,
                 Tag = "SR_NAVBAR_ITEM",
                 Alignment = ToolStripItemAlignment.Right,
-                Font = new Font(toolStrip.Font, FontStyle.Bold)
+                Font = new Font(toolStrip.Font, FontStyle.Bold),
+                ForeColor = Text
             };
             themeBtn.Click += (s, e) =>
             {
@@ -949,6 +1080,19 @@ namespace CodeWalker.WinForms
                 if (!themeBtn.IsDisposed)
                 {
                     themeBtn.Text = IsDarkMode ? "🌙 Sombre" : "☀️ Clair";
+                    themeBtn.ForeColor = Text;
+                }
+                if (!refreshBtn.IsDisposed)
+                {
+                    refreshBtn.ForeColor = Text;
+                }
+                if (!settingsBtn.IsDisposed)
+                {
+                    settingsBtn.ForeColor = Text;
+                }
+                if (!titleItem.IsDisposed)
+                {
+                    titleItem.ForeColor = AccentColor;
                 }
             };
             ThemeChanged += updateHandler;

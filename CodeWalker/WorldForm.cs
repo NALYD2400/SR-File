@@ -241,7 +241,19 @@ namespace CodeWalker
 
             try
             {
-                SRThemeManager.RegisterForm(this, this.Toolbar);
+                SRThemeManager.RegisterForm(this, this.Toolbar, () =>
+                {
+                    if (this.Toolbar != null && this.ToolbarPanel != null)
+                    {
+                        this.Toolbar.AutoSize = true;
+                        int desired = this.Toolbar.PreferredSize.Width + 10;
+                        if (this.ToolbarPanel.Width < desired)
+                        {
+                            this.ToolbarPanel.Width = desired;
+                            this.Toolbar.Width = desired - 4;
+                        }
+                    }
+                });
                 ToolsPanel.VisibleChanged += (s, e) =>
                 {
                     if (ToolsPanel.Visible) SRThemeManager.ApplyToControls(ToolsPanel.Controls);

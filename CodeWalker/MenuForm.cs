@@ -284,6 +284,7 @@ namespace CodeWalker
                 else if (json.Contains("\"toggle_theme\"")) SRThemeManager.ToggleDarkMode();
                 else if (json.Contains("\"toggle_azerty\"")) ToggleAzerty();
                 else if (json.Contains("\"set_theme\"")) SetThemePreset(json);
+                else if (json.Contains("\"refresh\"")) { ApplyCurrentTheme(); SendStateToWeb(); }
                 else if (json.Contains("\"ui_ready\"")) SendStateToWeb();
             }
             catch (Exception ex)

@@ -104,16 +104,31 @@
       align-items: center;
       gap: 14px;
     }
-    .brand-logo {
-      width: 44px;
-      height: 44px;
+    .brand-logo-card {
+      width: 42px;
+      height: 42px;
       border-radius: 10px;
-      object-fit: contain;
-      filter: drop-shadow(0 4px 10px var(--accent-glow));
-      transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+      background: #FFFFFF;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+      flex-shrink: 0;
+      overflow: hidden;
     }
-    .brand:hover .brand-logo {
+    html.light .brand-logo-card {
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.08);
+    }
+    .brand:hover .brand-logo-card {
       transform: scale(1.08) rotate(-3deg);
+      box-shadow: 0 4px 16px var(--accent-glow);
+    }
+    .brand-logo-card .brand-logo {
+      width: 32px;
+      height: 32px;
+      object-fit: contain;
+      filter: drop-shadow(0 2px 6px rgba(255, 122, 41, 0.3));
     }
     .brand-title {
       font-size: 18px;
@@ -144,7 +159,7 @@
     .nav-actions {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
     }
 
     .btn-nav {
@@ -161,11 +176,33 @@
       gap: 7px;
       transition: all 0.2s ease;
     }
+    .btn-nav.icon-btn {
+      padding: 7px 11px;
+      font-size: 14px;
+      min-width: 36px;
+      justify-content: center;
+    }
     .btn-nav:hover {
       border-color: var(--accent);
       background: var(--card-hover);
       transform: translateY(-1px);
       box-shadow: 0 3px 10px rgba(0, 0, 0, 0.15);
+    }
+    .nav-divider {
+      width: 1px;
+      height: 22px;
+      background: var(--border);
+      margin: 0 2px;
+      opacity: 0.7;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .refreshing .refresh-icon {
+      display: inline-block;
+      animation: spin 0.6s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     main {
@@ -556,7 +593,9 @@
 
   <header>
     <div class="brand">
-      <img src="logo.png" alt="SR File Logo" class="brand-logo" />
+      <div class="brand-logo-card">
+        <img src="logo.png" alt="SR File" class="brand-logo" />
+      </div>
       <div>
         <div class="brand-title">
           <span>SR FILE</span>
@@ -570,14 +609,19 @@
       <button class="btn-nav" id="btnAzerty" onclick="toggleKeyboard()" title="Changer disposition clavier (ZQSD / WASD)">
         <span id="lblKbIcon">⌨</span> <span id="lblKbText">AZERTY (FR)</span>
       </button>
-      <button class="btn-nav" id="btnTheme" onclick="toggleTheme()" title="Basculer Mode Sombre / Clair">
-        <span id="lblThemeIcon">🌙</span> <span id="lblThemeText">Sombre</span>
+      <button class="btn-nav icon-btn" id="btnTheme" onclick="toggleTheme()" title="Basculer Mode Sombre / Clair">
+        <span id="lblThemeIcon">🌙</span>
       </button>
-      <button class="btn-nav" onclick="openSettings()" title="Paramètres de l'application">
+      <div class="nav-divider"></div>
+      <button class="btn-nav" id="btnRefresh" onclick="refreshApp()" title="Actualiser l'application et recharger">
+        <span class="refresh-icon">🔄</span> <span>Actualiser</span>
+      </button>
+      <div class="nav-divider"></div>
+      <button class="btn-nav" onclick="openSettings()" title="Paramètres et Personnalisation">
         <span>⚙</span> Réglages
       </button>
-      <button class="btn-nav" onclick="sendAction('open_about')" title="À propos de SR File">
-        <span>ℹ</span> À propos
+      <button class="btn-nav icon-btn" onclick="sendAction('open_about')" title="À propos de SR File">
+        <span>ℹ</span>
       </button>
     </div>
   </header>
@@ -896,6 +940,16 @@
       }
     }
 
+    function refreshApp() {
+      const btn = document.getElementById('btnRefresh');
+      if (btn) btn.classList.add('refreshing');
+      sendAction('refresh');
+      setTimeout(() => {
+        if (btn) btn.classList.remove('refreshing');
+        location.reload();
+      }, 400);
+    }
+
     function toggleTheme() {
       isDarkMode = !isDarkMode;
       applyThemeState(isDarkMode);
@@ -904,16 +958,18 @@
 
     function applyThemeState(dark) {
       isDarkMode = dark;
+      const lblIcon = document.getElementById('lblThemeIcon');
+      const lblTxt = document.getElementById('lblThemeText');
       if (dark) {
         document.documentElement.classList.add('dark');
         document.documentElement.classList.remove('light');
-        document.getElementById('lblThemeIcon').textContent = '🌙';
-        document.getElementById('lblThemeText').textContent = 'Sombre';
+        if (lblIcon) lblIcon.textContent = '🌙';
+        if (lblTxt) lblTxt.textContent = 'Sombre';
       } else {
         document.documentElement.classList.remove('dark');
         document.documentElement.classList.add('light');
-        document.getElementById('lblThemeIcon').textContent = '☀️';
-        document.getElementById('lblThemeText').textContent = 'Clair';
+        if (lblIcon) lblIcon.textContent = '☀️';
+        if (lblTxt) lblTxt.textContent = 'Clair';
       }
     }
 
