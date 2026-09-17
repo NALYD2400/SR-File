@@ -11,7 +11,7 @@ namespace SRFile.Sidecar.Services
 {
     public class TextService
     {
-        public Gxt2TableDto ParseGxt2(byte[] data, string fileName = "")
+        public Gxt2TableDto ParseGxt2(byte[] data, string fileName = "", CryptoService? cryptoService = null)
         {
             if (data == null || data.Length == 0)
             {
@@ -36,6 +36,10 @@ namespace SRFile.Sidecar.Services
                     }
                     if (string.IsNullOrEmpty(resolved) || resolved == entry.Hash.ToString())
                     {
+                        resolved = cryptoService?.LookupHash(entry.Hash);
+                    }
+                    if (string.IsNullOrEmpty(resolved) || resolved == entry.Hash.ToString())
+                    {
                         resolved = null;
                     }
 
@@ -55,7 +59,7 @@ namespace SRFile.Sidecar.Services
             );
         }
 
-        public Gxt2TableDto ParseGxt2FromRequest(ParseGxt2Request req)
+        public Gxt2TableDto ParseGxt2FromRequest(ParseGxt2Request req, CryptoService? cryptoService = null)
         {
             if (req == null) return new Gxt2TableDto("empty.gxt2", 0, new List<Gxt2EntryDto>());
 
@@ -63,7 +67,7 @@ namespace SRFile.Sidecar.Services
             {
                 byte[] fileBytes = File.ReadAllBytes(req.FilePath);
                 string name = !string.IsNullOrWhiteSpace(req.FileName) ? req.FileName : Path.GetFileName(req.FilePath);
-                return ParseGxt2(fileBytes, name);
+                return ParseGxt2(fileBytes, name, cryptoService);
             }
 
             if (!string.IsNullOrWhiteSpace(req.Base64Data))
@@ -76,7 +80,7 @@ namespace SRFile.Sidecar.Services
                 }
                 byte[] bytes = Convert.FromBase64String(rawBase64);
                 string name = !string.IsNullOrWhiteSpace(req.FileName) ? req.FileName : "uploaded.gxt2";
-                return ParseGxt2(bytes, name);
+                return ParseGxt2(bytes, name, cryptoService);
             }
 
             throw new ArgumentException("Aucun chemin de fichier valide ou donnée base64 fournie.");
@@ -200,25 +204,56 @@ namespace SRFile.Sidecar.Services
 
             var seenHashes = new HashSet<uint>();
 
+            static string? Clean(string? str, uint hash)
+            {
+                if (string.IsNullOrEmpty(str) || str == hash.ToString()) return null;
+                return str;
+            }
+
             // 1. Direct hash lookup if numeric/hex was parsed
             if (hasUintHash)
             {
-                string? directGlobal = GlobalText.TryGetString(queryHash);
-                string? directJenk = JenkIndex.TryGetString(queryHash);
-                string? cryptoLookup = cryptoService?.LookupHash(queryHash);
+                string? directGlobal = Clean(GlobalText.TryGetString(queryHash), queryHash);
+                string? directJenk = Clean(JenkIndex.TryGetString(queryHash), queryHash);
+                string? cryptoLookup = Clean(cryptoService?.LookupHash(queryHash), queryHash);
 
-                string foundText = directGlobal ?? directJenk ?? cryptoLookup ?? $"0x{queryHash:X8}";
-                string? resolvedKey = directJenk ?? cryptoLookup;
+                if (directGlobal != null || directJenk != null || cryptoLookup != null || isHex)
+                {
+                    string foundText = directGlobal ?? directJenk ?? cryptoLookup ?? $"0x{queryHash:X8}";
+                    string? resolvedKey = directJenk ?? cryptoLookup;
 
-                results.Add(new Gxt2SearchResultDto(
-                    RpfPath: "global_dictionary",
-                    EntryPath: "strings.txt",
-                    Hash: queryHash,
-                    HexHash: $"0x{queryHash:X8}",
-                    Text: foundText,
-                    ResolvedKey: resolvedKey
-                ));
-                seenHashes.Add(queryHash);
+                    results.Add(new Gxt2SearchResultDto(
+                        RpfPath: "global_dictionary",
+                        EntryPath: "strings.txt",
+                        Hash: queryHash,
+                        HexHash: $"0x{queryHash:X8}",
+                        Text: foundText,
+                        ResolvedKey: resolvedKey
+                    ));
+                    seenHashes.Add(queryHash);
+                }
+            }
+
+            // 1b. Direct Jenkins hash lookup for the query label itself
+            uint stringJenkHash = JenkHash.GenHash(q, JenkHashInputEncoding.UTF8);
+            if (!seenHashes.Contains(stringJenkHash))
+            {
+                string? sGlobal = Clean(GlobalText.TryGetString(stringJenkHash), stringJenkHash);
+                string? sJenk = Clean(JenkIndex.TryGetString(stringJenkHash), stringJenkHash);
+                string? sCrypto = Clean(cryptoService?.LookupHash(stringJenkHash), stringJenkHash);
+
+                if (sGlobal != null || sJenk != null || sCrypto != null)
+                {
+                    results.Add(new Gxt2SearchResultDto(
+                        RpfPath: "global_dictionary",
+                        EntryPath: "JenkHash",
+                        Hash: stringJenkHash,
+                        HexHash: $"0x{stringJenkHash:X8}",
+                        Text: sGlobal ?? sCrypto ?? sJenk ?? q,
+                        ResolvedKey: sJenk ?? sCrypto ?? q
+                    ));
+                    seenHashes.Add(stringJenkHash);
+                }
             }
 
             // 2. GlobalText.Index
@@ -243,7 +278,7 @@ namespace SRFile.Sidecar.Services
                     if (match)
                     {
                         seenHashes.Add(kvp.Key);
-                        string? resolvedKey = JenkIndex.TryGetString(kvp.Key);
+                        string? resolvedKey = Clean(JenkIndex.TryGetString(kvp.Key), kvp.Key) ?? Clean(cryptoService?.LookupHash(kvp.Key), kvp.Key);
                         results.Add(new Gxt2SearchResultDto(
                             RpfPath: "global_text",
                             EntryPath: "GlobalText.Index",
@@ -267,7 +302,7 @@ namespace SRFile.Sidecar.Services
                     if (seenHashes.Contains(item.HashUint)) continue;
 
                     seenHashes.Add(item.HashUint);
-                    string? globalVal = GlobalText.TryGetString(item.HashUint);
+                    string? globalVal = Clean(GlobalText.TryGetString(item.HashUint), item.HashUint);
                     results.Add(new Gxt2SearchResultDto(
                         RpfPath: "dictionary",
                         EntryPath: "strings.txt",
@@ -289,7 +324,8 @@ namespace SRFile.Sidecar.Services
             {
                 foreach (var entry in entries)
                 {
-                    sb.Append(entry.HexHash);
+                    string labelOrHex = !string.IsNullOrEmpty(entry.ResolvedKey) ? entry.ResolvedKey : entry.HexHash;
+                    sb.Append(labelOrHex);
                     sb.Append(" = ");
                     sb.AppendLine(entry.Text);
                 }
@@ -324,10 +360,6 @@ namespace SRFile.Sidecar.Services
                     uint.TryParse(keyPart.Substring(2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint parsedHex))
                 {
                     hash = parsedHex;
-                }
-                else if (keyPart.Length == 8 && uint.TryParse(keyPart, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint parsedHex8))
-                {
-                    hash = parsedHex8;
                 }
                 else if (uint.TryParse(keyPart, out uint parsedUint))
                 {

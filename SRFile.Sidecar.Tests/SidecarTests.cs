@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Text;
+using SRFile.Sidecar.Models;
 using SRFile.Sidecar.Services;
 using SRFile.Sidecar.Utils;
 using Xunit;
@@ -1299,16 +1300,100 @@ namespace SRFile.Sidecar.Tests
 
             uint carbineHash = CodeWalker.GameFiles.JenkHash.GenHash("special_carbine_mk2");
 
-            // Direct hex search
+            // Direct hex search: verify text and resolvedKey are not empty
             var hexResults = textService.SearchGlobalStrings($"0x{carbineHash:X8}", cryptoService, 10);
             Assert.NotEmpty(hexResults);
-            Assert.Contains(hexResults, r => r.Hash == carbineHash);
+            var directMatch = hexResults.First(r => r.Hash == carbineHash);
+            Assert.Equal("special_carbine_mk2", directMatch.Text);
+            Assert.Equal("special_carbine_mk2", directMatch.ResolvedKey);
+
+            // Search by exact label name
+            var labelResults = textService.SearchGlobalStrings("special_carbine_mk2", cryptoService, 10);
+            Assert.NotEmpty(labelResults);
+            Assert.Contains(labelResults, r => r.Hash == carbineHash && r.ResolvedKey == "special_carbine_mk2");
 
             // Substring search
             var subResults = textService.SearchGlobalStrings("special_carbine", cryptoService, 10);
             Assert.NotEmpty(subResults);
             Assert.Contains(subResults, r => r.Text.Contains("special_carbine_mk2", StringComparison.OrdinalIgnoreCase) ||
                                              (r.ResolvedKey != null && r.ResolvedKey.Contains("special_carbine_mk2", StringComparison.OrdinalIgnoreCase)));
+        }
+
+        [Fact]
+        public void BuildGxt2_WithLabelNamesAndHexHashes_ComputesJenkinsHashAccurately()
+        {
+            var textService = new TextService();
+            string input = "FEEDBACK = Feedback text\nTURISMO_R = Grotti Turismo\n0x867B4512 = Raw Hex Hash Entry";
+            byte[] binary = textService.BuildGxt2(input, "labels.gxt2");
+
+            Assert.NotNull(binary);
+            Assert.True(binary.Length > 16);
+
+            var parsed = textService.ParseGxt2(binary, "labels.gxt2");
+            Assert.Equal(3u, parsed.EntryCount);
+
+            uint expectedFeedbackHash = CodeWalker.GameFiles.JenkHash.GenHash("FEEDBACK");
+            uint expectedTurismoHash = CodeWalker.GameFiles.JenkHash.GenHash("TURISMO_R");
+
+            Assert.Contains(parsed.Entries, e => e.Hash == expectedFeedbackHash && e.Text == "Feedback text");
+            Assert.Contains(parsed.Entries, e => e.Hash == expectedTurismoHash && e.Text == "Grotti Turismo");
+            Assert.Contains(parsed.Entries, e => e.Hash == 0x867B4512 && e.Text == "Raw Hex Hash Entry");
+
+            // Entries must be sorted in ascending order of hash
+            for (int i = 1; i < parsed.Entries.Count; i++)
+            {
+                Assert.True(parsed.Entries[i].Hash >= parsed.Entries[i - 1].Hash);
+            }
+        }
+
+        [Fact]
+        public void ExportToText_WithResolvedKeys_IncludesLabelNamesInOutput()
+        {
+            var textService = new TextService();
+            var entries = new List<Gxt2EntryDto>
+            {
+                new Gxt2EntryDto(0x1234, "0x00001234", "Value with label", "VEH_LABEL"),
+                new Gxt2EntryDto(0x5678, "0x00005678", "Value without label", null)
+            };
+
+            string exported = textService.ExportToText(entries);
+            Assert.Contains("VEH_LABEL = Value with label", exported);
+            Assert.Contains("0x00005678 = Value without label", exported);
+        }
+
+        [Fact]
+        public void ExtractFolderToZipStream_WithEmptyOrNullPath_ExtractsRootArchiveAccurately()
+        {
+            string tempDir = Path.Combine(Path.GetTempPath(), "SRFile_ZipExtract_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            string rpfPath = Path.Combine(tempDir, "root_test.rpf");
+
+            try
+            {
+                var rpf = CodeWalker.GameFiles.RpfFile.CreateNew(tempDir, "root_test.rpf", CodeWalker.GameFiles.RpfEncryption.OPEN);
+                CodeWalker.GameFiles.RpfFile.CreateFile(rpf.Root, "sample1.txt", Encoding.UTF8.GetBytes("sample 1 content"), true);
+                CodeWalker.GameFiles.RpfFile.CreateFile(rpf.Root, "sample2.txt", Encoding.UTF8.GetBytes("sample 2 content"), true);
+
+                var rpfService = new RpfService();
+                rpfService.OpenRpf(rpfPath);
+
+                // Null or empty folderPath should extract the root directory without error
+                using var zipStream = rpfService.ExtractFolderToZipStream(rpfPath, "");
+                Assert.NotNull(zipStream);
+                Assert.True(zipStream.Length > 0);
+
+                using var archive = new System.IO.Compression.ZipArchive(zipStream, System.IO.Compression.ZipArchiveMode.Read);
+                Assert.Equal(2, archive.Entries.Count);
+                Assert.Contains(archive.Entries, e => e.Name == "sample1.txt");
+                Assert.Contains(archive.Entries, e => e.Name == "sample2.txt");
+            }
+            finally
+            {
+                if (Directory.Exists(tempDir))
+                {
+                    try { Directory.Delete(tempDir, true); } catch { }
+                }
+            }
         }
 
         [Fact]

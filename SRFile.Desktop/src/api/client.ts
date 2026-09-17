@@ -354,6 +354,24 @@ export const api = {
     });
   },
 
+  async extractFolderZip(
+    rpfPath: string,
+    folderPath: string,
+    recursive = true
+  ): Promise<Blob> {
+    const base = await getBaseUrl();
+    const res = await fetch(`${base}/api/rpf/extract-folder`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rpfPath, folderPath, asZip: true, recursive }),
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.error || "Échec de l'extraction ZIP du dossier");
+    }
+    return res.blob();
+  },
+
   async extractBatch(
     rpfPath: string,
     entryPaths: string[],
@@ -364,6 +382,31 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ rpfPath, entryPaths, outputDirectory, asZip }),
     });
+  },
+
+  async extractBatchZip(
+    rpfPath: string,
+    entryPaths: string[]
+  ): Promise<Blob> {
+    const base = await getBaseUrl();
+    const res = await fetch(`${base}/api/rpf/extract-batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rpfPath, entryPaths, asZip: true }),
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.error || "Échec du téléchargement groupé ZIP");
+    }
+    return res.blob();
+  },
+
+  async downloadFile(rpfPath: string, entryPath: string): Promise<Blob> {
+    const base = await getBaseUrl();
+    const params = new URLSearchParams({ rpfPath, entryPath });
+    const res = await fetch(`${base}/api/rpf/file?${params.toString()}`);
+    if (!res.ok) throw new Error("Échec du téléchargement du fichier");
+    return res.blob();
   },
 
   // 7. Diagnostics & System Metrics API

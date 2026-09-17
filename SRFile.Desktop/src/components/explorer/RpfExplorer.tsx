@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef } from "react";
 import { RpfInfo, RpfEntry, TextureItem, AudioStream } from "../../types";
-import { api, getBaseUrl, triggerFileDownload } from "../../api/client";
+import { api, triggerFileDownload } from "../../api/client";
 import { useToast } from "../common/Toast";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
@@ -112,19 +112,7 @@ export const RpfExplorer: React.FC<RpfExplorerProps> = ({ currentRpf, onOpenAnot
       const folderName = targetFolder
         ? targetFolder.split(/[\\/]/).pop() || "dossier"
         : currentRpf.name.replace(/\.rpf$/i, "");
-      const base = await getBaseUrl();
-      const res = await fetch(`${base}/api/rpf/extract-folder`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rpfPath: currentRpf.filePath,
-          folderPath: targetFolder,
-          asZip: true,
-          recursive: true,
-        }),
-      });
-      if (!res.ok) throw new Error("Échec de l'extraction ZIP du dossier");
-      const blob = await res.blob();
+      const blob = await api.extractFolderZip(currentRpf.filePath, targetFolder, true);
       triggerFileDownload(blob, `${folderName}.zip`);
       toast.success("Extraction ZIP réussie", `Le dossier "${folderName}" a été exporté en archive ZIP.`);
     } catch (err: any) {
@@ -138,24 +126,25 @@ export const RpfExplorer: React.FC<RpfExplorerProps> = ({ currentRpf, onOpenAnot
     if (!currentRpf || selectedPaths.size === 0) return;
     setIsExtractingBatch(true);
     try {
-      const base = await getBaseUrl();
-      const res = await fetch(`${base}/api/rpf/extract-batch`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rpfPath: currentRpf.filePath,
-          entryPaths: Array.from(selectedPaths),
-          asZip: true,
-        }),
-      });
-      if (!res.ok) throw new Error("Échec du téléchargement groupé ZIP");
-      const blob = await res.blob();
+      const blob = await api.extractBatchZip(currentRpf.filePath, Array.from(selectedPaths));
       triggerFileDownload(blob, "export_selection.zip");
       toast.success("Téléchargement terminé", `${selectedPaths.size} élément(s) exporté(s) en ZIP.`);
     } catch (err: any) {
       toast.error("Erreur de téléchargement", err.message);
     } finally {
       setIsExtractingBatch(false);
+    }
+  };
+
+  const handleDownloadFile = async (entry: RpfEntry, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!currentRpf) return;
+    try {
+      const blob = await api.downloadFile(currentRpf.filePath, entry.path);
+      triggerFileDownload(blob, entry.name);
+      toast.success("Téléchargement réussi", `Fichier "${entry.name}" exporté.`);
+    } catch (err: any) {
+      toast.error("Erreur de téléchargement", err.message);
     }
   };
 
@@ -452,7 +441,7 @@ export const RpfExplorer: React.FC<RpfExplorerProps> = ({ currentRpf, onOpenAnot
         <div className="flex-1 flex flex-col overflow-hidden bg-[#0A0E16]">
           {/* Table Header */}
           <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-[#222D42] bg-[#121824]/50 text-[11px] font-mono uppercase text-[#64748B] font-semibold select-none shrink-0 items-center">
-            <div className="col-span-6 flex items-center gap-2.5">
+            <div className="col-span-5 flex items-center gap-2.5">
               <button
                 onClick={toggleSelectAll}
                 className="text-[#64748B] hover:text-[#FF7A29] transition-colors cursor-pointer"
@@ -469,6 +458,7 @@ export const RpfExplorer: React.FC<RpfExplorerProps> = ({ currentRpf, onOpenAnot
             <div className="col-span-2">Format / Type</div>
             <div className="col-span-2 text-right">Taille</div>
             <div className="col-span-2 text-right">Compressé</div>
+            <div className="col-span-1 text-right">Action</div>
           </div>
 
           {/* Table Body with TanStack Virtualizer */}
@@ -518,7 +508,7 @@ export const RpfExplorer: React.FC<RpfExplorerProps> = ({ currentRpf, onOpenAnot
                       )}
                     >
                       {/* Checkbox + Name + Icon */}
-                      <div className="col-span-6 flex items-center gap-2.5 truncate">
+                      <div className="col-span-5 flex items-center gap-2.5 truncate">
                         <button
                           onClick={(e) => toggleSelectPath(e, entry.path)}
                           className="text-[#64748B] hover:text-[#FF7A29] transition-colors cursor-pointer shrink-0"
@@ -557,6 +547,31 @@ export const RpfExplorer: React.FC<RpfExplorerProps> = ({ currentRpf, onOpenAnot
                         {entry.isDirectory || entry.compressedSize === 0
                           ? "-"
                           : formatBytes(entry.compressedSize)}
+                      </div>
+
+                      {/* Quick Action Button */}
+                      <div className="col-span-1 flex items-center justify-end">
+                        {entry.isDirectory ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleExtractFolderZip(entry.path);
+                            }}
+                            disabled={isExtractingZip}
+                            className="p-1 rounded hover:bg-[#FF7A29]/20 text-[#64748B] hover:text-[#FF7A29] transition-colors cursor-pointer"
+                            title="Extraire ce dossier en ZIP"
+                          >
+                            <Archive className="w-3.5 h-3.5" />
+                          </button>
+                        ) : (
+                          <button
+                            onClick={(e) => handleDownloadFile(entry, e)}
+                            className="p-1 rounded hover:bg-[#FF7A29]/20 text-[#64748B] hover:text-[#FF7A29] transition-colors cursor-pointer"
+                            title="Télécharger ce fichier"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
@@ -895,14 +910,13 @@ export const RpfExplorer: React.FC<RpfExplorerProps> = ({ currentRpf, onOpenAnot
                   {/* Generic File Download & Batch Selection Toggle */}
                   {!selectedEntry.isDirectory && (
                     <div className="space-y-2 pt-2">
-                      <a
-                        href={api.getRawFileUrl(currentRpf.filePath, selectedEntry.path)}
-                        download={selectedEntry.name}
+                      <button
+                        onClick={() => handleDownloadFile(selectedEntry)}
                         className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-[#FF7A29] hover:bg-[#FF8F4D] text-white font-bold text-xs transition-colors cursor-pointer shadow-lg"
                       >
                         <Download className="w-4 h-4" />
                         <span>Exporter ce fichier</span>
-                      </a>
+                      </button>
 
                       <button
                         onClick={(e) => toggleSelectPath(e, selectedEntry.path)}

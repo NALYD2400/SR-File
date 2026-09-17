@@ -15,7 +15,7 @@ import {
   RefreshCw,
   FileText
 } from "lucide-react";
-import { cn } from "../../lib/utils";
+import { cn, jenkinsHash } from "../../lib/utils";
 
 interface Gxt2StudioProps {
   currentRpf?: RpfInfo | null;
@@ -135,7 +135,7 @@ export const Gxt2Studio: React.FC<Gxt2StudioProps> = ({ currentRpf, onNavigateTo
   // Table State
   const [currentFileName, setCurrentFileName] = useState<string>("custom_text.gxt2");
   const [entries, setEntries] = useState<Gxt2Entry[]>(DEFAULT_SAMPLE_ENTRIES);
-  const [selectedEntryIndex, setSelectedEntryIndex] = useState<number>(0);
+  const [selectedHash, setSelectedHash] = useState<number | null>(DEFAULT_SAMPLE_ENTRIES[0]?.hash ?? null);
 
   // Search State
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -159,8 +159,10 @@ export const Gxt2Studio: React.FC<Gxt2StudioProps> = ({ currentRpf, onNavigateTo
     );
   }, [entries, searchQuery, searchScope]);
 
-  // Selected Entry
-  const selectedEntry = entries[selectedEntryIndex] ?? null;
+  // Selected Entry (always resolves by stable hash, immune to filtering desync)
+  const selectedEntry = useMemo(() => {
+    return entries.find((e) => e.hash === selectedHash) ?? entries[0] ?? null;
+  }, [entries, selectedHash]);
 
   // Real-time backend search for global or RPF
   const handlePerformSearch = async () => {
@@ -187,55 +189,67 @@ export const Gxt2Studio: React.FC<Gxt2StudioProps> = ({ currentRpf, onNavigateTo
     }
   };
 
-  // Add new blank entry
+  // Add new blank entry with auto-computed Jenkins hash
   const handleAddNewEntry = () => {
-    const randomHash = Math.floor(Math.random() * 0xffffffff);
-    const hex = "0x" + randomHash.toString(16).toUpperCase().padStart(8, "0");
+    const defaultLabel = `STRING_${entries.length + 1}`;
+    const hash = jenkinsHash(defaultLabel);
+    const hex = "0x" + hash.toString(16).toUpperCase().padStart(8, "0");
     const newEntry: Gxt2Entry = {
-      hash: randomHash,
+      hash,
       hexHash: hex,
-      resolvedKey: `NEW_STRING_${entries.length + 1}`,
+      resolvedKey: defaultLabel,
       text: "Nouveau texte de sous-titre GTA V"
     };
     setEntries((prev) => [newEntry, ...prev]);
-    setSelectedEntryIndex(0);
-    toast.info("Entrée créée", `Ajoutée avec le hash ${hex}`);
+    setSelectedHash(hash);
+    toast.info("Entrée créée", `Ajoutée avec le label ${defaultLabel} (${hex})`);
   };
 
-  // Delete current entry
+  // Delete current entry safely by hash
   const handleDeleteSelected = () => {
-    if (entries.length === 0) return;
-    setEntries((prev) => prev.filter((_, idx) => idx !== selectedEntryIndex));
-    setSelectedEntryIndex((prev) => Math.max(0, prev - 1));
+    if (!selectedEntry) return;
+    const currentIdx = entries.findIndex((e) => e.hash === selectedEntry.hash);
+    const nextEntries = entries.filter((e) => e.hash !== selectedEntry.hash);
+    setEntries(nextEntries);
+    const nextItem = nextEntries[Math.min(currentIdx, nextEntries.length - 1)];
+    setSelectedHash(nextItem ? nextItem.hash : null);
     toast.warning("Entrée supprimée");
   };
 
-  // Update entry text or key
+  // Update entry text or key (with live Jenkins hash calculation when label changes)
   const handleUpdateEntry = (field: "text" | "resolvedKey" | "hexHash", value: string) => {
     if (!selectedEntry) return;
 
     setEntries((prev) => {
-      const copy = [...prev];
-      const target = { ...copy[selectedEntryIndex] };
+      return prev.map((entry) => {
+        if (entry.hash !== selectedEntry.hash) return entry;
 
-      if (field === "text") {
-        target.text = value;
-      } else if (field === "resolvedKey") {
-        target.resolvedKey = value.toUpperCase().replace(/[^A-Z0-9_]/g, "");
-      } else if (field === "hexHash") {
-        let cleanHex = value.trim();
-        if (!cleanHex.startsWith("0x") && !cleanHex.startsWith("0X")) {
-          cleanHex = "0x" + cleanHex;
+        const target = { ...entry };
+        if (field === "text") {
+          target.text = value;
+        } else if (field === "resolvedKey") {
+          const cleanKey = value.toUpperCase().replace(/[^A-Z0-9_]/g, "");
+          target.resolvedKey = cleanKey || null;
+          if (cleanKey) {
+            const newHash = jenkinsHash(cleanKey);
+            target.hash = newHash;
+            target.hexHash = "0x" + newHash.toString(16).toUpperCase().padStart(8, "0");
+            setSelectedHash(newHash);
+          }
+        } else if (field === "hexHash") {
+          let cleanHex = value.trim();
+          if (!cleanHex.startsWith("0x") && !cleanHex.startsWith("0X")) {
+            cleanHex = "0x" + cleanHex;
+          }
+          target.hexHash = cleanHex;
+          const parsed = parseInt(cleanHex, 16);
+          if (!isNaN(parsed)) {
+            target.hash = parsed;
+            setSelectedHash(parsed);
+          }
         }
-        target.hexHash = cleanHex;
-        const parsed = parseInt(cleanHex, 16);
-        if (!isNaN(parsed)) {
-          target.hash = parsed;
-        }
-      }
-
-      copy[selectedEntryIndex] = target;
-      return copy;
+        return target;
+      });
     });
   };
 
@@ -261,14 +275,16 @@ export const Gxt2Studio: React.FC<Gxt2StudioProps> = ({ currentRpf, onNavigateTo
     };
 
     setEntries((prev) => [newEntry, ...prev]);
-    setSelectedEntryIndex(0);
+    setSelectedHash(item.hash);
     toast.success("Chaîne importée", `Ajout de ${item.hexHash} à la table.`);
   };
 
-  // Export to compiled .gxt2 binary
+  // Export to compiled .gxt2 binary (preserving label names for JenkHash)
   const handleExportBinary = async () => {
     try {
-      const textRepresentation = entries.map((e) => `${e.hexHash} = ${e.text}`).join("\n");
+      const textRepresentation = entries
+        .map((e) => `${e.resolvedKey || e.hexHash} = ${e.text}`)
+        .join("\n");
       const blob = await api.buildGxt2Binary(textRepresentation, currentFileName);
       triggerFileDownload(blob, currentFileName.endsWith(".gxt2") ? currentFileName : `${currentFileName}.gxt2`);
       toast.success("Compilation réussie", `${entries.length} chaînes compilées en binaire GXT2.`);
@@ -277,9 +293,11 @@ export const Gxt2Studio: React.FC<Gxt2StudioProps> = ({ currentRpf, onNavigateTo
     }
   };
 
-  // Export to text
+  // Export to text (labels prioritized over raw hashes)
   const handleExportText = () => {
-    const txt = entries.map((e) => `${e.hexHash} = ${e.text}`).join("\n");
+    const txt = entries
+      .map((e) => `${e.resolvedKey || e.hexHash} = ${e.text}`)
+      .join("\n");
     const blob = new Blob([txt], { type: "text/plain;charset=utf-8" });
     triggerFileDownload(blob, `${currentFileName.replace(/\.gxt2$/i, "")}.txt`);
     toast.success("Export Texte terminé", "Fichier .txt téléchargé.");
@@ -306,7 +324,7 @@ export const Gxt2Studio: React.FC<Gxt2StudioProps> = ({ currentRpf, onNavigateTo
           const table = await api.parseGxt2({ base64Data: base64, fileName: file.name });
           setEntries(table.entries);
           setCurrentFileName(file.name);
-          setSelectedEntryIndex(0);
+          if (table.entries.length > 0) setSelectedHash(table.entries[0].hash);
           toast.success("Archive GXT2 chargée", `${table.entryCount} chaînes analysées avec succès.`);
         } catch (innerErr: any) {
           toast.error("Erreur d'analyse GXT2", innerErr.message);
@@ -320,7 +338,7 @@ export const Gxt2Studio: React.FC<Gxt2StudioProps> = ({ currentRpf, onNavigateTo
     }
   };
 
-  // Parse raw text or JSON input
+  // Parse raw text or JSON input (accurately computing Jenkins hashes for labels)
   const handleApplyImportText = () => {
     if (!importRawText.trim()) return;
 
@@ -329,13 +347,24 @@ export const Gxt2Studio: React.FC<Gxt2StudioProps> = ({ currentRpf, onNavigateTo
       if (importRawText.trim().startsWith("[") || importRawText.trim().startsWith("{")) {
         const parsed = JSON.parse(importRawText);
         const list: Gxt2Entry[] = Array.isArray(parsed) ? parsed : [parsed];
-        const sanitized = list.map((item, idx) => ({
-          hash: item.hash || idx,
-          hexHash: item.hexHash || `0x${(item.hash || idx).toString(16).toUpperCase()}`,
-          resolvedKey: item.resolvedKey || null,
-          text: item.text || String(item)
-        }));
+        const sanitized = list.map((item, idx) => {
+          let hash = item.hash;
+          let hex = item.hexHash;
+          let key = item.resolvedKey;
+          if (!hash && key) {
+            hash = jenkinsHash(key);
+          }
+          if (!hash) hash = idx;
+          if (!hex) hex = "0x" + hash.toString(16).toUpperCase().padStart(8, "0");
+          return {
+            hash,
+            hexHash: hex,
+            resolvedKey: key || null,
+            text: item.text || String(item)
+          };
+        });
         setEntries(sanitized);
+        if (sanitized.length > 0) setSelectedHash(sanitized[0].hash);
         setIsImportModalOpen(false);
         toast.success("Importation JSON réussie", `${sanitized.length} entrées appliquées.`);
         return;
@@ -345,7 +374,7 @@ export const Gxt2Studio: React.FC<Gxt2StudioProps> = ({ currentRpf, onNavigateTo
       const lines = importRawText.split(/\r?\n/);
       const newItems: Gxt2Entry[] = [];
 
-      lines.forEach((line, idx) => {
+      lines.forEach((line) => {
         const trimmed = line.trim();
         if (!trimmed || trimmed.startsWith("//") || trimmed.startsWith("#")) return;
 
@@ -353,18 +382,23 @@ export const Gxt2Studio: React.FC<Gxt2StudioProps> = ({ currentRpf, onNavigateTo
         if (sepIdx > 0) {
           const keyPart = trimmed.slice(0, sepIdx).trim();
           const valPart = trimmed.slice(sepIdx + 1).trim();
-          let hash = idx;
-          let hex = "0x" + idx.toString(16).padStart(8, "0");
+          let hash: number;
+          let hex: string;
+          let resolvedKey: string | null = null;
 
           if (keyPart.startsWith("0x") || keyPart.startsWith("0X")) {
-            hex = keyPart;
-            hash = parseInt(keyPart, 16) || idx;
+            hex = "0x" + keyPart.slice(2).toUpperCase().padStart(8, "0");
+            hash = parseInt(keyPart.slice(2), 16) || 0;
+          } else {
+            resolvedKey = keyPart;
+            hash = jenkinsHash(keyPart);
+            hex = "0x" + hash.toString(16).toUpperCase().padStart(8, "0");
           }
 
           newItems.push({
             hash,
             hexHash: hex,
-            resolvedKey: keyPart.startsWith("0x") ? null : keyPart,
+            resolvedKey,
             text: valPart
           });
         }
@@ -372,7 +406,7 @@ export const Gxt2Studio: React.FC<Gxt2StudioProps> = ({ currentRpf, onNavigateTo
 
       if (newItems.length > 0) {
         setEntries(newItems);
-        setSelectedEntryIndex(0);
+        setSelectedHash(newItems[0].hash);
         setIsImportModalOpen(false);
         toast.success("Importation Texte réussie", `${newItems.length} entrées ajoutées.`);
       } else {
@@ -559,12 +593,12 @@ export const Gxt2Studio: React.FC<Gxt2StudioProps> = ({ currentRpf, onNavigateTo
                   <p>Aucune entrée dans la table.</p>
                 </div>
               ) : (
-                filteredTableEntries.map((entry, idx) => {
-                  const isSelected = selectedEntryIndex === idx;
+                filteredTableEntries.map((entry) => {
+                  const isSelected = selectedHash === entry.hash;
                   return (
                     <div
-                      key={idx}
-                      onClick={() => setSelectedEntryIndex(idx)}
+                      key={entry.hash}
+                      onClick={() => setSelectedHash(entry.hash)}
                       className={cn(
                         "p-3 transition-colors cursor-pointer space-y-1 select-none",
                         isSelected

@@ -223,19 +223,25 @@ app.MapPost("/api/rpf/extract-folder", (ExtractFolderRequest req, RpfService ser
 {
     try
     {
+        string safeFolder = req.FolderPath ?? string.Empty;
         if (req.AsZip == true)
         {
-            var zipStream = service.ExtractFolderToZipStream(req.RpfPath, req.FolderPath, req.Recursive ?? true);
-            string folderName = Path.GetFileName(req.FolderPath.TrimEnd('/', '\\'));
-            if (string.IsNullOrEmpty(folderName)) folderName = "archive_folder";
+            var zipStream = service.ExtractFolderToZipStream(req.RpfPath, safeFolder, req.Recursive ?? true);
+            string folderName = !string.IsNullOrWhiteSpace(safeFolder) ? Path.GetFileName(safeFolder.TrimEnd('/', '\\')) : string.Empty;
+            if (string.IsNullOrEmpty(folderName))
+            {
+                folderName = Path.GetFileNameWithoutExtension(req.RpfPath);
+                if (string.IsNullOrEmpty(folderName)) folderName = "archive_folder";
+            }
             return Results.Stream(zipStream, "application/zip", fileDownloadName: $"{folderName}.zip");
         }
         else
         {
+            string folderSegment = !string.IsNullOrWhiteSpace(safeFolder) ? Path.GetFileName(safeFolder.TrimEnd('/', '\\')) : (Path.GetFileNameWithoutExtension(req.RpfPath) ?? "Root");
             string outDir = string.IsNullOrWhiteSpace(req.OutputDirectory)
-                ? Path.Combine(Environment.CurrentDirectory, "Export", Path.GetFileName(req.FolderPath.TrimEnd('/', '\\')))
+                ? Path.Combine(Environment.CurrentDirectory, "Export", folderSegment)
                 : req.OutputDirectory;
-            var result = service.ExtractFolderToDisk(req.RpfPath, req.FolderPath, outDir, req.Recursive ?? true);
+            var result = service.ExtractFolderToDisk(req.RpfPath, safeFolder, outDir, req.Recursive ?? true);
             return Results.Ok(result);
         }
     }
@@ -249,6 +255,11 @@ app.MapPost("/api/rpf/extract-batch", (ExtractBatchRequest req, RpfService servi
 {
     try
     {
+        if (req.EntryPaths == null || req.EntryPaths.Count == 0)
+        {
+            return Results.BadRequest(new { error = "Aucun chemin d'entrée fourni." });
+        }
+
         if (req.AsZip == true)
         {
             var zipStream = service.ExtractBatchToZipStream(req.RpfPath, req.EntryPaths);
@@ -664,7 +675,7 @@ app.MapGet("/api/text/search", (string? q, string? rpfPath, string? entryPath, i
     }
 });
 
-app.MapPost("/api/text/parse-gxt2", async (HttpRequest request, TextService textService) =>
+app.MapPost("/api/text/parse-gxt2", async (HttpRequest request, TextService textService, CryptoService cryptoService) =>
 {
     try
     {
@@ -676,7 +687,7 @@ app.MapPost("/api/text/parse-gxt2", async (HttpRequest request, TextService text
             {
                 using var ms = new MemoryStream();
                 await file.CopyToAsync(ms);
-                var table = textService.ParseGxt2(ms.ToArray(), file.FileName);
+                var table = textService.ParseGxt2(ms.ToArray(), file.FileName, cryptoService);
                 return Results.Ok(table);
             }
         }
@@ -684,7 +695,7 @@ app.MapPost("/api/text/parse-gxt2", async (HttpRequest request, TextService text
         var req = await request.ReadFromJsonAsync<ParseGxt2Request>();
         if (req != null)
         {
-            var table = textService.ParseGxt2FromRequest(req);
+            var table = textService.ParseGxt2FromRequest(req, cryptoService);
             return Results.Ok(table);
         }
 
