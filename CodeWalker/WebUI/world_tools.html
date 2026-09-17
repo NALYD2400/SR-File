@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="fr" class="dark">
 <head>
   <meta charset="UTF-8" />
@@ -109,14 +109,31 @@
       background: var(--card-hover);
     }
 
+    /* Drag Resize Handle on left border */
+    .resize-handle {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 5px;
+      height: 100vh;
+      cursor: ew-resize;
+      z-index: 9999;
+      background: transparent;
+      transition: background 0.15s ease;
+    }
+    .resize-handle:hover, .resize-handle.active {
+      background: var(--accent);
+      box-shadow: 0 0 10px var(--accent-glow);
+    }
+
     /* Tabs Bar */
     .tabs-bar {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       background: var(--surface);
       border-bottom: 1px solid var(--border);
       padding: 4px;
-      gap: 4px;
+      gap: 3px;
       position: sticky;
       top: 47px;
       z-index: 40;
@@ -125,19 +142,29 @@
       background: transparent;
       border: none;
       color: var(--subtext);
-      padding: 6px 4px;
-      font-size: 11px;
+      padding: 6px 2px;
+      font-size: 10.5px;
       font-weight: 700;
       border-radius: 6px;
       cursor: pointer;
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 3px;
+      gap: 2px;
       transition: all 0.2s ease;
+      min-width: 0;
+    }
+    .tab-btn span.tab-label {
+      display: block;
+      width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      text-align: center;
     }
     .tab-btn span.icon {
       font-size: 14px;
+      flex-shrink: 0;
     }
     .tab-btn:hover {
       color: var(--text);
@@ -409,7 +436,8 @@
       font-family: monospace;
       color: var(--text);
       font-weight: 600;
-      max-width: 170px;
+      max-width: 60%;
+      text-align: right;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -459,6 +487,7 @@
   </style>
 </head>
 <body>
+  <div id="resize-handle" class="resize-handle" title="Glisser pour redimensionner le panneau"></div>
 
   <header>
     <div class="header-title-group">
@@ -475,19 +504,19 @@
   <nav class="tabs-bar">
     <button class="tab-btn active" onclick="setTab('world', this)">
       <span class="icon">🌍</span>
-      <span>Monde</span>
+      <span class="tab-label">Monde</span>
     </button>
     <button class="tab-btn" onclick="setTab('markers', this)">
       <span class="icon">📍</span>
-      <span>Téléport</span>
+      <span class="tab-label">Téléport</span>
     </button>
     <button class="tab-btn" onclick="setTab('selection', this)">
       <span class="icon">🎯</span>
-      <span>Sélection</span>
+      <span class="tab-label">Sélection</span>
     </button>
     <button class="tab-btn" onclick="setTab('options', this)">
       <span class="icon">⚙</span>
-      <span>Rendu</span>
+      <span class="tab-label">Rendu</span>
     </button>
   </nav>
 
@@ -897,8 +926,40 @@
           console.error(err);
         }
       });
-      send('ui_ready');
+    // Drag-to-resize panel
+    const resizeHandle = document.getElementById('resize-handle');
+    let isResizing = false;
+    let startX = 0;
+    let startW = 0;
+
+    if (resizeHandle) {
+      resizeHandle.addEventListener('mousedown', e => {
+        isResizing = true;
+        startX = e.screenX;
+        startW = window.outerWidth || document.documentElement.clientWidth;
+        resizeHandle.classList.add('active');
+        document.body.style.cursor = 'ew-resize';
+        e.preventDefault();
+      });
+
+      window.addEventListener('mousemove', e => {
+        if (!isResizing) return;
+        const dx = e.screenX - startX;
+        const newWidth = Math.max(260, Math.min(800, Math.round(startW - dx)));
+        send('set_panel_width', { width: newWidth });
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (isResizing) {
+          isResizing = false;
+          resizeHandle.classList.remove('active');
+          document.body.style.cursor = 'default';
+        }
+      });
     }
-  </script>
+
+    send('ui_ready');
+  }
+</script>
 </body>
 </html>

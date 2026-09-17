@@ -6755,6 +6755,8 @@ namespace CodeWalker
         private void ToolsPanelShowButton_Click(object sender, EventArgs e)
         {
             ToolsPanel.Visible = true;
+            ToolsPanel.Height = ClientSize.Height;
+            ToolsPanel.Left = Math.Max(0, ClientSize.Width - ToolsPanel.Width);
             ToolsPanel.BringToFront();
             if (webViewTools != null) webViewTools.BringToFront();
             ToolsPanelHideButton.Focus();
@@ -8104,13 +8106,28 @@ namespace CodeWalker
             SubtitleLabel.Visible = false;
         }
 
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            if (ToolsPanel != null)
+            {
+                ToolsPanel.Height = ClientSize.Height;
+                ToolsPanel.Left = Math.Max(0, ClientSize.Width - ToolsPanel.Width);
+            }
+        }
+
         private async void InitWebToolsPanel()
         {
             try
             {
                 if (webViewTools != null) return;
 
-                ToolsPanel.Width = 380;
+                int defaultWidth = 380;
+                ToolsPanel.Width = defaultWidth;
+                ToolsPanel.Top = 0;
+                ToolsPanel.Height = ClientSize.Height;
+                ToolsPanel.Left = Math.Max(0, ClientSize.Width - defaultWidth);
+                ToolsPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Right;
                 ToolsPanel.BackColor = System.Drawing.Color.FromArgb(10, 14, 22);
 
                 try
@@ -8130,7 +8147,8 @@ namespace CodeWalker
                 webViewTools.BringToFront();
 
                 string userDataFolder = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "SRFile", "WebView2_WorldTools");
-                var env = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateAsync(null, userDataFolder);
+                var options = new Microsoft.Web.WebView2.Core.CoreWebView2EnvironmentOptions("--allow-file-access-from-files --disable-web-security");
+                var env = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateAsync(null, userDataFolder, options);
                 await webViewTools.EnsureCoreWebView2Async(env);
 
                 webViewTools.CoreWebView2.Settings.IsStatusBarEnabled = false;
@@ -8139,17 +8157,27 @@ namespace CodeWalker
 
                 webViewTools.WebMessageReceived += WebViewTools_WebMessageReceived;
 
-                string htmlPath = System.IO.Path.Combine(Application.StartupPath, "WebUI", "world_tools.html");
-                if (System.IO.File.Exists(htmlPath))
+                string webUiDir = System.IO.Path.Combine(Application.StartupPath, "WebUI");
+                if (!System.IO.Directory.Exists(webUiDir))
                 {
-                    webViewTools.CoreWebView2.Navigate(htmlPath);
+                    webUiDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.StartupPath, "..", "..", "..", "CodeWalker", "WebUI"));
+                }
+
+                if (System.IO.Directory.Exists(webUiDir))
+                {
+                    webViewTools.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                        "srfile.tools",
+                        webUiDir,
+                        Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow
+                    );
+                    webViewTools.CoreWebView2.Navigate("https://srfile.tools/world_tools.html");
                 }
                 else
                 {
-                    string devPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.StartupPath, "..", "..", "..", "CodeWalker", "WebUI", "world_tools.html"));
-                    if (System.IO.File.Exists(devPath))
+                    string htmlPath = System.IO.Path.Combine(Application.StartupPath, "WebUI", "world_tools.html");
+                    if (System.IO.File.Exists(htmlPath))
                     {
-                        webViewTools.CoreWebView2.Navigate(devPath);
+                        webViewTools.CoreWebView2.Navigate(htmlPath);
                     }
                 }
             }
@@ -8172,6 +8200,19 @@ namespace CodeWalker
                         ToolsPanel.Visible = false;
                         ToolsPanelShowButton.Focus();
                     }));
+                }
+                else if (json.Contains("\"set_panel_width\""))
+                {
+                    var match = System.Text.RegularExpressions.Regex.Match(json, "\"width\":\\s*([0-9]+)");
+                    if (match.Success && int.TryParse(match.Groups[1].Value, out int w))
+                    {
+                        this.BeginInvoke(new Action(() => {
+                            int newWidth = Math.Max(260, Math.Min(ClientSize.Width - 50, w));
+                            ToolsPanel.Width = newWidth;
+                            ToolsPanel.Left = ClientSize.Width - newWidth;
+                            ToolsPanel.Height = ClientSize.Height;
+                        }));
+                    }
                 }
                 else if (json.Contains("\"ui_ready\""))
                 {
