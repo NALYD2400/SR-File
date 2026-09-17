@@ -2366,6 +2366,9 @@ namespace CodeWalker
 
 
 
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern int ShowCursor(bool bShow);
+
         private bool isCursorHidden = false;
         private bool mouseCaptured = false;
 
@@ -2373,7 +2376,7 @@ namespace CodeWalker
         {
             if (isCursorHidden)
             {
-                Cursor.Show();
+                while (ShowCursor(true) < 0) { }
                 isCursorHidden = false;
             }
         }
@@ -2382,15 +2385,22 @@ namespace CodeWalker
         {
             if (!isCursorHidden)
             {
-                Cursor.Hide();
+                while (ShowCursor(false) >= 0) { }
                 isCursorHidden = true;
             }
         }
 
         public void SetMouseCapture(bool capture)
         {
+            if (ToolsPanel != null && ToolsPanel.Visible)
+            {
+                mouseCaptured = false;
+                EnsureCursorVisible();
+                return;
+            }
+
             mouseCaptured = capture;
-            if (!mouseCaptured || (ToolsPanel != null && ToolsPanel.Visible))
+            if (!mouseCaptured)
             {
                 EnsureCursorVisible();
             }
@@ -2402,6 +2412,11 @@ namespace CodeWalker
 
         public void ToggleMouseCapture()
         {
+            if (ToolsPanel != null && ToolsPanel.Visible)
+            {
+                SetMouseCapture(false);
+                return;
+            }
             SetMouseCapture(!mouseCaptured);
         }
 
@@ -2425,13 +2440,15 @@ namespace CodeWalker
         {
             EnsureBoundsLoadedAround(pos, 4);
 
-            Ray downRay = new Ray(pos + new Vector3(0, 0, searchAbove), -Vector3.UnitZ);
-            var hit = space.RayIntersect(downRay, searchAbove + searchBelow, collisionmeshlayers);
-
             float hmMin = 0, hmMax = 0;
             bool hasHm = heightmaps != null && heightmaps.GetHeight(pos.X, pos.Y, out hmMin, out hmMax);
 
-            if (hit.Hit)
+            float startZ = Math.Max(pos.Z + searchAbove, (hasHm ? hmMax : pos.Z) + 5.0f);
+            Ray downRay = new Ray(new Vector3(pos.X, pos.Y, startZ), -Vector3.UnitZ);
+            float maxDist = Math.Max(searchAbove + searchBelow, startZ - (hasHm ? hmMin - 10.0f : pos.Z - searchBelow));
+            var hit = space.RayIntersect(downRay, maxDist, collisionmeshlayers);
+
+            if (hit.Hit && hit.Normal.Z > 0.25f)
             {
                 if (!hasHm || hit.Position.Z >= hmMin - 5.0f)
                 {
@@ -2503,9 +2520,11 @@ namespace CodeWalker
                     float gZ = GetGroundElevation(testPos);
 
                     pedEntity.Position = new Vector3(testPos.X, testPos.Y, gZ + 1.7f);
+                    pedEntity.CameraEntity.Position = pedEntity.Position;
+                    pedEntity.CameraEntity.Orientation = Quaternion.Identity;
                     pedEntity.Velocity = Vector3.Zero;
-                    pedEntity.EnableCollisions = true;
-                    pedEntity.Enabled = true;
+                    pedEntity.EnableCollisions = false;
+                    pedEntity.Enabled = false;
                     pedEntity.OnGround = true;
                     pedVerticalVelocity = 0.0f;
 
@@ -2563,6 +2582,8 @@ namespace CodeWalker
                     Vector3 exitPos = activeVehicle.Position - rgt * 2.2f;
                     float gZ = GetGroundElevation(exitPos, 15.0f, 30.0f);
                     pedEntity.Position = new Vector3(exitPos.X, exitPos.Y, gZ + 1.7f);
+                    pedEntity.CameraEntity.Position = pedEntity.Position;
+                    pedEntity.CameraEntity.Orientation = Quaternion.Identity;
                     pedEntity.Velocity = Vector3.Zero;
                     pedEntity.OnGround = true;
                     pedVerticalVelocity = 0.0f;
@@ -2573,8 +2594,8 @@ namespace CodeWalker
                         playerPed.UpdateEntity();
                     }
                 }
-                pedEntity.EnableCollisions = true;
-                pedEntity.Enabled = true;
+                pedEntity.EnableCollisions = false;
+                pedEntity.Enabled = false;
                 camera.SetFollowEntity(pedEntity.CameraEntity);
                 camera.TargetDistance = 3.5f;
                 camera.Smoothness = 20.0f;
@@ -2676,43 +2697,85 @@ namespace CodeWalker
             bool hasHm = heightmaps != null && heightmaps.GetHeight(nextPos.X, nextPos.Y, out hmMin, out hmMax);
 
             // Vertical ground raycast for terrain/floor elevation clamping
-            Vector3 rayTop = new Vector3(nextPos.X, nextPos.Y, Math.Max(nextPos.Z + 3.0f, currentFeetZ + 3.0f));
+            float startZ = Math.Max(currentFeetZ + 1.5f, (hasHm ? hmMax : currentFeetZ) + 2.0f);
+            Vector3 rayTop = new Vector3(nextPos.X, nextPos.Y, startZ);
             Ray downRay = new Ray(rayTop, -Vector3.UnitZ);
-            var groundHit = space.RayIntersect(downRay, 30.0f, collisionmeshlayers);
+            float rayDist = Math.Max(60.0f, startZ - (hasHm ? hmMin - 10.0f : currentFeetZ - 50.0f));
+            var groundHit = space.RayIntersect(downRay, rayDist, collisionmeshlayers);
 
-            bool haveGround = groundHit.Hit || hasHm;
-            float groundZ = groundHit.Hit ? groundHit.Position.Z : hmMax;
+            bool haveGround = false;
+            float groundZ = currentFeetZ;
 
-            if (groundHit.Hit && hasHm && groundHit.Position.Z < hmMin - 5.0f)
+            if (groundHit.Hit && groundHit.Normal.Z > 0.25f)
             {
-                // Ray hit an interior or subterranean mesh below terrain heightmap
+                // Reject subterranean hits below heightmap baseline
+                if (!hasHm || groundHit.Position.Z >= hmMin - 5.0f)
+                {
+                    groundZ = groundHit.Position.Z;
+                    haveGround = true;
+                }
+                else if (hasHm)
+                {
+                    groundZ = hmMax;
+                    haveGround = true;
+                }
+            }
+            else if (hasHm)
+            {
                 groundZ = hmMax;
+                haveGround = true;
             }
 
             if (haveGround)
             {
-                float heightDiff = groundZ - currentFeetZ;
+                // Ground elevation at current (pre-move) position
+                float curGroundZ = GetGroundElevation(pedEntity.Position, 25.0f, 60.0f);
+                bool isBuried = currentFeetZ < curGroundZ - 0.05f;
 
-                // CRITICAL FIX: If feet are below ground surface, ALWAYS snap up immediately!
-                if (currentFeetZ < groundZ - 0.05f)
+                if (isBuried)
                 {
+                    // Character is underground: snap up immediately to the higher of current or target ground
                     pedEntity.OnGround = true;
                     pedVerticalVelocity = 0.0f;
-                    nextPos.Z = groundZ + 1.7f;
+                    nextPos.Z = Math.Max(groundZ, curGroundZ) + 1.7f;
                 }
-                else if (pedEntity.OnGround)
+                else
                 {
-                    // Walking on ground:
-                    if (heightDiff <= 0.75f && heightDiff >= -1.2f)
+                    float heightDiff = groundZ - currentFeetZ;
+
+                    if (pedEntity.OnGround)
                     {
-                        pedEntity.OnGround = true;
-                        pedVerticalVelocity = 0.0f;
-                        nextPos.Z = groundZ + 1.7f;
+                        if (heightDiff <= 0.75f && heightDiff >= -1.2f)
+                        {
+                            // Walk up or down slope / steps
+                            pedEntity.OnGround = true;
+                            pedVerticalVelocity = 0.0f;
+                            nextPos.Z = groundZ + 1.7f;
+                        }
+                        else if (heightDiff < -1.2f)
+                        {
+                            // Ledge drop / falling off
+                            pedEntity.OnGround = false;
+                            pedVerticalVelocity -= 12.0f * elapsed;
+                            nextPos.Z += pedVerticalVelocity * elapsed;
+                            if (nextPos.Z - 1.7f <= groundZ)
+                            {
+                                nextPos.Z = groundZ + 1.7f;
+                                pedVerticalVelocity = 0.0f;
+                                pedEntity.OnGround = true;
+                            }
+                        }
+                        else
+                        {
+                            // Barrier or wall too high (> 0.75m): block horizontal movement only
+                            nextPos.X = pedEntity.Position.X;
+                            nextPos.Y = pedEntity.Position.Y;
+                            nextPos.Z = pedEntity.Position.Z;
+                        }
                     }
-                    else if (heightDiff < -1.2f)
+                    else
                     {
-                        // Drop/ledge: fall
-                        pedEntity.OnGround = false;
+                        // Airborne / jumping / falling
                         pedVerticalVelocity -= 12.0f * elapsed;
                         nextPos.Z += pedVerticalVelocity * elapsed;
                         if (nextPos.Z - 1.7f <= groundZ)
@@ -2721,25 +2784,6 @@ namespace CodeWalker
                             pedVerticalVelocity = 0.0f;
                             pedEntity.OnGround = true;
                         }
-                    }
-                    else
-                    {
-                        // Barrier or wall too high (> 0.75m): block horizontal movement only
-                        nextPos.X = pedEntity.Position.X;
-                        nextPos.Y = pedEntity.Position.Y;
-                        nextPos.Z = pedEntity.Position.Z; // Maintain current elevation, do not trap underground
-                    }
-                }
-                else
-                {
-                    // Airborne / falling
-                    pedVerticalVelocity -= 12.0f * elapsed;
-                    nextPos.Z += pedVerticalVelocity * elapsed;
-                    if (nextPos.Z - 1.7f <= groundZ)
-                    {
-                        nextPos.Z = groundZ + 1.7f;
-                        pedVerticalVelocity = 0.0f;
-                        pedEntity.OnGround = true;
                     }
                 }
             }
@@ -2760,8 +2804,12 @@ namespace CodeWalker
             }
 
             pedEntity.Position = nextPos;
+            pedEntity.CameraEntity.Position = nextPos;
+            pedEntity.CameraEntity.Orientation = Quaternion.Identity;
             pedEntity.Velocity = new Vector3(horizDisp.X / Math.Max(elapsed, 0.001f), horizDisp.Y / Math.Max(elapsed, 0.001f), pedVerticalVelocity);
-            pedEntity.ControlMovement = Vector2.Zero; // prevent double physics from Entity.PreUpdate
+            pedEntity.ControlMovement = Vector2.Zero;
+            pedEntity.Enabled = false;
+            pedEntity.EnableCollisions = false;
 
             if (playerPed != null)
             {
@@ -2923,22 +2971,28 @@ namespace CodeWalker
             int hitCount = 0;
             Vector3 sumNormal = Vector3.Zero;
 
+            float hmMinV = 0, hmMaxV = 0;
+            bool hasHmVeh = heightmaps != null && heightmaps.GetHeight(nextPos.X, nextPos.Y, out hmMinV, out hmMaxV);
+
             for (int i = 0; i < 4; i++)
             {
-                Vector3 rayStart = nextPos + wheelOffsets[i] + Vector3.UnitZ * 3.5f;
+                float wStartZ = Math.Max(nextPos.Z + 3.5f, (hasHmVeh ? hmMaxV : nextPos.Z) + 2.0f);
+                Vector3 rayStart = nextPos + wheelOffsets[i];
+                rayStart.Z = wStartZ;
                 Ray ray = new Ray(rayStart, -Vector3.UnitZ);
-                var hit = space.RayIntersect(ray, 15.0f, collisionmeshlayers);
-                if (hit.Hit)
+                var hit = space.RayIntersect(ray, 30.0f, collisionmeshlayers);
+                if (hit.Hit && hit.Normal.Z > 0.25f)
                 {
-                    sumZ += hit.Position.Z;
-                    sumNormal += hit.Normal;
-                    hitCount++;
+                    if (!hasHmVeh || hit.Position.Z >= hmMinV - 5.0f)
+                    {
+                        sumZ += hit.Position.Z;
+                        sumNormal += hit.Normal;
+                        hitCount++;
+                    }
                 }
             }
 
             Vector3 upVec = Vector3.UnitZ;
-            float hmMinV = 0, hmMaxV = 0;
-            bool hasHmVeh = heightmaps != null && heightmaps.GetHeight(nextPos.X, nextPos.Y, out hmMinV, out hmMaxV);
 
             if (hitCount > 0)
             {
@@ -3077,12 +3131,18 @@ namespace CodeWalker
                 newPed.Init(pedName, gameFileCache);
                 newPed.LoadDefaultComponents(gameFileCache);
                 Vector3 spawnRef = (ControlMode == WorldControlMode.Ped) ? pedEntity.Position : camEntity.Position;
-                float groundZ = GetGroundElevation(spawnRef);
+                float groundZ;
+                lock (Renderer.RenderSyncRoot)
+                {
+                    groundZ = GetGroundElevation(spawnRef);
+                }
 
                 pedEntity.Position = new Vector3(spawnRef.X, spawnRef.Y, groundZ + 1.7f);
+                pedEntity.CameraEntity.Position = pedEntity.Position;
+                pedEntity.CameraEntity.Orientation = Quaternion.Identity;
                 pedEntity.Velocity = Vector3.Zero;
-                pedEntity.EnableCollisions = true;
-                pedEntity.Enabled = true;
+                pedEntity.EnableCollisions = false;
+                pedEntity.Enabled = false;
                 pedEntity.OnGround = true;
                 pedVerticalVelocity = 0.0f;
 
@@ -3166,7 +3226,11 @@ namespace CodeWalker
                 Vector3 fwdxy = Vector3.Normalize(new Vector3(fwd.X, fwd.Y, 0));
                 Vector3 targetXY = enterImmediately ? spawnPos : (spawnPos + fwdxy * 4.0f);
 
-                float groundZ = GetGroundElevation(targetXY);
+                float groundZ;
+                lock (Renderer.RenderSyncRoot)
+                {
+                    groundZ = GetGroundElevation(targetXY);
+                }
 
                 newVeh.Position = new Vector3(targetXY.X, targetXY.Y, groundZ + vehicleGroundOffset.Z);
                 vehicleHeading = (float)Math.Atan2(fwdxy.Y, fwdxy.X) - (float)(Math.PI / 2.0);
@@ -7280,6 +7344,10 @@ namespace CodeWalker
             }
             else
             {
+                if (MouseRButtonDown && ControlMode != WorldControlMode.Free)
+                {
+                    RotateCam(dx, dy);
+                }
                 UpdateMousePosition(e);
                 EnsureCursorVisible();
             }
@@ -9183,6 +9251,8 @@ namespace CodeWalker
                 webViewTools.Dock = DockStyle.Fill;
                 ToolsPanel.Controls.Add(webViewTools);
                 webViewTools.BringToFront();
+                ToolsPanel.MouseEnter += (s, ev) => { SetMouseCapture(false); EnsureCursorVisible(); };
+                webViewTools.MouseEnter += (s, ev) => { SetMouseCapture(false); EnsureCursorVisible(); };
                 UpdateToolsNavbarButtonState();
 
                 string userDataFolder = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "SRFile", "WebView2_WorldTools");
