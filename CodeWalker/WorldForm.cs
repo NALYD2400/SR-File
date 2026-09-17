@@ -6749,14 +6749,18 @@ namespace CodeWalker
         private void ToolsPanelHideButton_Click(object sender, EventArgs e)
         {
             ToolsPanel.Visible = false;
-            ToolsPanelShowButton.Focus();
+            if (ToolsPanelShowButton != null)
+            {
+                ToolsPanelShowButton.Visible = true;
+                ToolsPanelShowButton.BringToFront();
+                ToolsPanelShowButton.Focus();
+            }
         }
 
         private void ToolsPanelShowButton_Click(object sender, EventArgs e)
         {
+            UpdateToolsPanelBounds();
             ToolsPanel.Visible = true;
-            ToolsPanel.Height = ClientSize.Height;
-            ToolsPanel.Left = Math.Max(0, ClientSize.Width - ToolsPanel.Width);
             ToolsPanel.BringToFront();
             if (webViewTools != null) webViewTools.BringToFront();
             ToolsPanelHideButton.Focus();
@@ -7883,6 +7887,7 @@ namespace CodeWalker
 
         private void ToolbarRotationSnappingCustomButton_Click(object sender, EventArgs e)
         {
+            UpdateToolsPanelBounds();
             ToolsPanel.Visible = true;
             ToolsTabControl.SelectedTab = OptionsTabPage;
             OptionsTabControl.SelectedTab = OptionsHelpersTabPage;
@@ -7891,6 +7896,7 @@ namespace CodeWalker
 
         private void ToolbarSnapGridSizeButton_Click(object sender, EventArgs e)
         {
+            UpdateToolsPanelBounds();
             ToolsPanel.Visible = true;
             ToolsTabControl.SelectedTab = OptionsTabPage;
             OptionsTabControl.SelectedTab = OptionsHelpersTabPage;
@@ -8106,13 +8112,44 @@ namespace CodeWalker
             SubtitleLabel.Visible = false;
         }
 
+        private void UpdateToolsPanelBounds(int? requestedWidth = null)
+        {
+            if (ToolsPanel == null) return;
+
+            int topOffset = 0;
+            foreach (Control c in this.Controls)
+            {
+                if (c != null && c.Visible && c != ToolsPanel && (c.Dock == DockStyle.Top || c is ToolStrip || c is MenuStrip || c.Name.Contains("Navbar") || c.Name.Contains("Title")))
+                {
+                    topOffset = Math.Max(topOffset, c.Bottom);
+                }
+            }
+            if (topOffset == 0) topOffset = 38;
+
+            int bottomOffset = (StatusStrip != null && StatusStrip.Visible && StatusStrip.Height > 0) ? StatusStrip.Height : 22;
+
+            int currentW = requestedWidth ?? (ToolsPanel.Width > 0 ? ToolsPanel.Width : 380);
+            int width = Math.Max(260, Math.Min(ClientSize.Width - 100, currentW));
+            int left = Math.Max(0, ClientSize.Width - width);
+            int height = Math.Max(100, ClientSize.Height - topOffset - bottomOffset);
+
+            ToolsPanel.Anchor = AnchorStyles.None;
+            ToolsPanel.SetBounds(left, topOffset, width, height);
+            ToolsPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Right;
+
+            if (ToolsPanelShowButton != null)
+            {
+                ToolsPanelShowButton.Top = topOffset + 6;
+                ToolsPanelShowButton.Left = Math.Max(10, ClientSize.Width - ToolsPanelShowButton.Width - 10);
+            }
+        }
+
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
             if (ToolsPanel != null)
             {
-                ToolsPanel.Height = ClientSize.Height;
-                ToolsPanel.Left = Math.Max(0, ClientSize.Width - ToolsPanel.Width);
+                UpdateToolsPanelBounds();
             }
         }
 
@@ -8122,12 +8159,7 @@ namespace CodeWalker
             {
                 if (webViewTools != null) return;
 
-                int defaultWidth = 380;
-                ToolsPanel.Width = defaultWidth;
-                ToolsPanel.Top = 0;
-                ToolsPanel.Height = ClientSize.Height;
-                ToolsPanel.Left = Math.Max(0, ClientSize.Width - defaultWidth);
-                ToolsPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Right;
+                UpdateToolsPanelBounds(380);
                 ToolsPanel.BackColor = System.Drawing.Color.FromArgb(10, 14, 22);
 
                 try
@@ -8198,7 +8230,12 @@ namespace CodeWalker
                 {
                     this.BeginInvoke(new Action(() => {
                         ToolsPanel.Visible = false;
-                        ToolsPanelShowButton.Focus();
+                        if (ToolsPanelShowButton != null)
+                        {
+                            ToolsPanelShowButton.Visible = true;
+                            ToolsPanelShowButton.BringToFront();
+                            ToolsPanelShowButton.Focus();
+                        }
                     }));
                 }
                 else if (json.Contains("\"set_panel_width\""))
@@ -8207,10 +8244,7 @@ namespace CodeWalker
                     if (match.Success && int.TryParse(match.Groups[1].Value, out int w))
                     {
                         this.BeginInvoke(new Action(() => {
-                            int newWidth = Math.Max(260, Math.Min(ClientSize.Width - 50, w));
-                            ToolsPanel.Width = newWidth;
-                            ToolsPanel.Left = ClientSize.Width - newWidth;
-                            ToolsPanel.Height = ClientSize.Height;
+                            UpdateToolsPanelBounds(w);
                         }));
                     }
                 }
