@@ -262,6 +262,17 @@ namespace CodeWalker
                             this.Toolbar.Width = desired - 4;
                         }
                     }
+                }, onRefresh: () =>
+                {
+                    if (this.Renderer != null)
+                    {
+                        lock (this.RenderSyncRoot)
+                        {
+                            try { this.Renderer.ReloadShaders(); } catch { }
+                        }
+                    }
+                    SRThemeManager.ApplyTheme(this);
+                    this.Invalidate(true);
                 });
                 ToolsPanel.VisibleChanged += (s, e) =>
                 {

@@ -116,6 +116,16 @@ namespace CodeWalker
 
 
 
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.Style |= 0x02000000; // WS_CLIPCHILDREN to ensure DirectX does not overwrite child controls
+                return cp;
+            }
+        }
+
         public PedsForm()
         {
             InitializeComponent();

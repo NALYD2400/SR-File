@@ -335,6 +335,10 @@ namespace CodeWalker.WinForms
                     ss.ForeColor = SubText;
                     ApplyToToolStripItems(ss.Items);
                 }
+                else if (c is SRTopNavbar navbar)
+                {
+                    navbar.ApplyThemeState();
+                }
                 else if (c is ToolStrip ts)
                 {
                     ts.Renderer = new SRToolStripRenderer();
@@ -819,6 +823,16 @@ namespace CodeWalker.WinForms
             foreach (ToolStripItem item in items)
             {
                 if (item == null) continue;
+                if (item.Tag as string == "SR_NAVBAR_BRAND")
+                {
+                    item.ForeColor = AccentColor;
+                    continue;
+                }
+                if (item.Tag as string == "SR_NAVBAR_SUBTITLE")
+                {
+                    item.ForeColor = SubText;
+                    continue;
+                }
                 item.ForeColor = Text;
                 item.BackColor = Surface;
                 if (item is ToolStripDropDownItem dd && dd.HasDropDownItems)
@@ -895,7 +909,7 @@ namespace CodeWalker.WinForms
             return false;
         }
 
-        public static void RegisterForm(Form form, ToolStrip navToolStrip = null, Action customUpdate = null)
+        public static void RegisterForm(Form form, ToolStrip navToolStrip = null, Action customUpdate = null, Action onRefresh = null, Action openSettingsAction = null)
         {
             if (form == null) return;
 
@@ -906,12 +920,12 @@ namespace CodeWalker.WinForms
             }
             catch { }
 
-            var topNavbar = EnsureTopNavbar(form);
+            var topNavbar = EnsureTopNavbar(form, null, onRefresh, openSettingsAction);
 
             // Backward-compatible toolstrip injection only if top navbar wasn't created and a navToolStrip was supplied
             if (topNavbar == null && navToolStrip != null)
             {
-                InjectNavbarControls(navToolStrip, form);
+                InjectNavbarControls(navToolStrip, form, openSettingsAction);
             }
 
             ApplyTheme(form);
@@ -1244,7 +1258,18 @@ namespace CodeWalker.WinForms
 
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
         {
-            e.TextColor = (e.Item.Selected || e.Item.Pressed) ? SRThemeManager.Text : (e.Item.Enabled ? SRThemeManager.Text : SRThemeManager.SubText);
+            if (e.Item.Tag as string == "SR_NAVBAR_BRAND")
+            {
+                e.TextColor = (e.Item.Selected || e.Item.Pressed) ? SRThemeManager.AccentHover : SRThemeManager.AccentColor;
+            }
+            else if (e.Item.Tag as string == "SR_NAVBAR_SUBTITLE")
+            {
+                e.TextColor = SRThemeManager.SubText;
+            }
+            else
+            {
+                e.TextColor = (e.Item.Selected || e.Item.Pressed) ? SRThemeManager.Text : (e.Item.Enabled ? e.Item.ForeColor : SRThemeManager.SubText);
+            }
             base.OnRenderItemText(e);
         }
 
