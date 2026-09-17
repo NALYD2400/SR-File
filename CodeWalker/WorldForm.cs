@@ -6657,6 +6657,13 @@ namespace CodeWalker
                 }
             }
 
+            if (k == Keys.F12)
+            {
+                OpenDevTools();
+                e.Handled = true;
+                return;
+            }
+
             if (k == Keys.F7 || (!ctrl && !shift && !e.Alt && k == Keys.T && !(ActiveControl is TextBox)))
             {
                 ToggleToolsPanel();
@@ -8128,6 +8135,7 @@ namespace CodeWalker
         }
 
         private ToolStripButton toolsNavbarBtn = null;
+        private ToolStripButton devToolsNavbarBtn = null;
 
         private void SetupToolsNavbarButton()
         {
@@ -8160,11 +8168,40 @@ namespace CodeWalker
                         };
                         toolsNavbarBtn.Click += (s, e) => ToggleToolsPanel();
                         navbar.Items.Add(toolsNavbarBtn);
+
+                        devToolsNavbarBtn = new ToolStripButton
+                        {
+                            Text = "🔍 DevTools",
+                            ToolTipText = "Ouvrir les outils de développement WebView2 (F12)",
+                            DisplayStyle = ToolStripItemDisplayStyle.Text,
+                            Tag = "SR_NAVBAR_ACTION",
+                            Alignment = ToolStripItemAlignment.Right,
+                            Font = new System.Drawing.Font("Segoe UI", 9f, System.Drawing.FontStyle.Regular),
+                            ForeColor = SRThemeManager.SubText,
+                            Margin = new Padding(2, 0, 4, 0)
+                        };
+                        devToolsNavbarBtn.Click += (s, e) => OpenDevTools();
+                        navbar.Items.Add(devToolsNavbarBtn);
                         break;
                     }
                 }
             }
             catch { }
+        }
+
+        public void OpenDevTools()
+        {
+            try
+            {
+                if (webViewTools != null && webViewTools.CoreWebView2 != null)
+                {
+                    webViewTools.CoreWebView2.OpenDevToolsWindow();
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("OpenDevTools error: " + ex.Message);
+            }
         }
 
         public void ToggleToolsPanel()
@@ -8201,17 +8238,20 @@ namespace CodeWalker
             int topOffset = 0;
             foreach (Control c in this.Controls)
             {
-                if (c != null && c.Visible && c != ToolsPanel && (c.Dock == DockStyle.Top || c is ToolStrip || c is MenuStrip || c.Name.Contains("Navbar") || c.Name.Contains("Title")))
+                if (c != null && c.Visible && c != ToolsPanel && !(c is StatusStrip) && c.Dock != DockStyle.Bottom)
                 {
-                    topOffset = Math.Max(topOffset, c.Bottom);
+                    if (c.Dock == DockStyle.Top || (c is ToolStrip && c.Top == 0) || c is MenuStrip || c.Name.Contains("Navbar") || c.Name.Contains("Title"))
+                    {
+                        topOffset = Math.Max(topOffset, c.Bottom);
+                    }
                 }
             }
-            if (topOffset == 0) topOffset = 38;
+            if (topOffset == 0 || topOffset > 100) topOffset = 38;
 
             int bottomOffset = (StatusStrip != null && StatusStrip.Visible && StatusStrip.Height > 0) ? StatusStrip.Height : 22;
 
-            int currentW = requestedWidth ?? (ToolsPanel.Width > 0 ? ToolsPanel.Width : 380);
-            int width = Math.Max(260, Math.Min(ClientSize.Width - 100, currentW));
+            int currentW = requestedWidth ?? (ToolsPanel.Width > 0 && ToolsPanel.Width < ClientSize.Width ? ToolsPanel.Width : 380);
+            int width = Math.Max(280, Math.Min(ClientSize.Width - 100, currentW));
             int left = Math.Max(0, ClientSize.Width - width);
             int height = Math.Max(100, ClientSize.Height - topOffset - bottomOffset);
 
@@ -8270,7 +8310,7 @@ namespace CodeWalker
 
                 webViewTools.CoreWebView2.Settings.IsStatusBarEnabled = false;
                 webViewTools.CoreWebView2.Settings.AreDevToolsEnabled = true;
-                webViewTools.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+                webViewTools.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
 
                 webViewTools.WebMessageReceived += WebViewTools_WebMessageReceived;
 
@@ -8322,6 +8362,12 @@ namespace CodeWalker
                             ToolsPanelShowButton.BringToFront();
                             ToolsPanelShowButton.Focus();
                         }
+                    }));
+                }
+                else if (json.Contains("\"open_devtools\""))
+                {
+                    this.BeginInvoke(new Action(() => {
+                        OpenDevTools();
                     }));
                 }
                 else if (json.Contains("\"set_panel_width\""))
