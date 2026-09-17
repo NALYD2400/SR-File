@@ -458,7 +458,7 @@ namespace CodeWalker
             this.ToolsPanel.Name = "ToolsPanel";
             this.ToolsPanel.Size = new System.Drawing.Size(218, 665);
             this.ToolsPanel.TabIndex = 2;
-            this.ToolsPanel.Visible = false;
+            this.ToolsPanel.Visible = true;
             // 
             // ToolsDragPanel
             // 

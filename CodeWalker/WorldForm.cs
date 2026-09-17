@@ -280,7 +280,9 @@ namespace CodeWalker
                 ToolsPanel.VisibleChanged += (s, e) =>
                 {
                     if (ToolsPanel.Visible) SRThemeManager.ApplyToControls(ToolsPanel.Controls);
+                    UpdateToolsNavbarButtonState();
                 };
+                SetupToolsNavbarButton();
             }
             catch { }
         }
@@ -6210,6 +6212,7 @@ namespace CodeWalker
         {
             Init();
             try { SRThemeManager.ApplyTheme(this); } catch { }
+            SetupToolsNavbarButton();
             InitWebToolsPanel();
         }
 
@@ -6647,8 +6650,18 @@ namespace CodeWalker
                         case Keys.U:
                             ToolsPanelShowButton.Visible = !ToolsPanelShowButton.Visible;
                             break;
+                        case Keys.T:
+                            ToggleToolsPanel();
+                            break;
                     }
                 }
+            }
+
+            if (k == Keys.F7 || (!ctrl && !shift && !e.Alt && k == Keys.T && !(ActiveControl is TextBox)))
+            {
+                ToggleToolsPanel();
+                e.Handled = true;
+                return;
             }
 
             if (k == Keys.Escape) //temporary? panic get cursor back when in first person mode
@@ -6749,6 +6762,7 @@ namespace CodeWalker
         private void ToolsPanelHideButton_Click(object sender, EventArgs e)
         {
             ToolsPanel.Visible = false;
+            UpdateToolsNavbarButtonState();
             if (ToolsPanelShowButton != null)
             {
                 ToolsPanelShowButton.Visible = true;
@@ -6763,6 +6777,7 @@ namespace CodeWalker
             ToolsPanel.Visible = true;
             ToolsPanel.BringToFront();
             if (webViewTools != null) webViewTools.BringToFront();
+            UpdateToolsNavbarButtonState();
             ToolsPanelHideButton.Focus();
         }
 
@@ -8112,6 +8127,73 @@ namespace CodeWalker
             SubtitleLabel.Visible = false;
         }
 
+        private ToolStripButton toolsNavbarBtn = null;
+
+        private void SetupToolsNavbarButton()
+        {
+            try
+            {
+                if (toolsNavbarBtn != null && !toolsNavbarBtn.IsDisposed) return;
+
+                foreach (Control c in this.Controls)
+                {
+                    if (c is CodeWalker.WinForms.SRTopNavbar navbar)
+                    {
+                        var sep = new ToolStripSeparator
+                        {
+                            Tag = "SR_NAVBAR_ACTION",
+                            Alignment = ToolStripItemAlignment.Right,
+                            Margin = new Padding(4, 8, 4, 8)
+                        };
+                        navbar.Items.Add(sep);
+
+                        toolsNavbarBtn = new ToolStripButton
+                        {
+                            Text = "🛠 Outils",
+                            ToolTipText = "Afficher / Masquer le menu d'outils 3D (Raccourci: Touche T ou F7)",
+                            DisplayStyle = ToolStripItemDisplayStyle.Text,
+                            Tag = "SR_NAVBAR_ACTION",
+                            Alignment = ToolStripItemAlignment.Right,
+                            Font = new System.Drawing.Font("Segoe UI", 9f, System.Drawing.FontStyle.Bold),
+                            ForeColor = SRThemeManager.AccentColor,
+                            Margin = new Padding(2, 0, 4, 0)
+                        };
+                        toolsNavbarBtn.Click += (s, e) => ToggleToolsPanel();
+                        navbar.Items.Add(toolsNavbarBtn);
+                        break;
+                    }
+                }
+            }
+            catch { }
+        }
+
+        public void ToggleToolsPanel()
+        {
+            if (ToolsPanel == null) return;
+            bool willShow = !ToolsPanel.Visible;
+            if (willShow)
+            {
+                UpdateToolsPanelBounds();
+                ToolsPanel.Visible = true;
+                ToolsPanel.BringToFront();
+                if (webViewTools != null) webViewTools.BringToFront();
+            }
+            else
+            {
+                ToolsPanel.Visible = false;
+            }
+            UpdateToolsNavbarButtonState();
+        }
+
+        private void UpdateToolsNavbarButtonState()
+        {
+            if (toolsNavbarBtn != null && !toolsNavbarBtn.IsDisposed)
+            {
+                bool isOpen = (ToolsPanel != null && ToolsPanel.Visible);
+                toolsNavbarBtn.ForeColor = isOpen ? SRThemeManager.AccentColor : SRThemeManager.SubText;
+            }
+        }
+
         private void UpdateToolsPanelBounds(int? requestedWidth = null)
         {
             if (ToolsPanel == null) return;
@@ -8160,6 +8242,8 @@ namespace CodeWalker
                 if (webViewTools != null) return;
 
                 UpdateToolsPanelBounds(380);
+                ToolsPanel.Visible = true;
+                ToolsPanel.BringToFront();
                 ToolsPanel.BackColor = System.Drawing.Color.FromArgb(10, 14, 22);
 
                 try
@@ -8177,6 +8261,7 @@ namespace CodeWalker
                 webViewTools.Dock = DockStyle.Fill;
                 ToolsPanel.Controls.Add(webViewTools);
                 webViewTools.BringToFront();
+                UpdateToolsNavbarButtonState();
 
                 string userDataFolder = System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "SRFile", "WebView2_WorldTools");
                 var options = new Microsoft.Web.WebView2.Core.CoreWebView2EnvironmentOptions("--allow-file-access-from-files --disable-web-security");
@@ -8230,6 +8315,7 @@ namespace CodeWalker
                 {
                     this.BeginInvoke(new Action(() => {
                         ToolsPanel.Visible = false;
+                        UpdateToolsNavbarButtonState();
                         if (ToolsPanelShowButton != null)
                         {
                             ToolsPanelShowButton.Visible = true;
@@ -8251,6 +8337,11 @@ namespace CodeWalker
                 else if (json.Contains("\"ui_ready\""))
                 {
                     this.BeginInvoke(new Action(() => {
+                        UpdateToolsPanelBounds();
+                        ToolsPanel.Visible = true;
+                        ToolsPanel.BringToFront();
+                        if (webViewTools != null) webViewTools.BringToFront();
+                        UpdateToolsNavbarButtonState();
                         SendInitToWebTools();
                     }));
                 }
