@@ -212,6 +212,15 @@ namespace CodeWalker
 
         bool initedOk = false;
 
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.Style |= 0x02000000; // WS_CLIPCHILDREN to ensure DirectX does not overwrite child controls
+                return cp;
+            }
+        }
 
         public WorldForm()
         {
@@ -241,7 +250,7 @@ namespace CodeWalker
 
             try
             {
-                SRThemeManager.RegisterForm(this, this.Toolbar, () =>
+                SRThemeManager.RegisterForm(this, null, () =>
                 {
                     if (this.Toolbar != null && this.ToolbarPanel != null)
                     {

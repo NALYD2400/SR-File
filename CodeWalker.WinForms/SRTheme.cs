@@ -834,6 +834,67 @@ namespace CodeWalker.WinForms
             }
         }
 
+        public static SRTopNavbar EnsureTopNavbar(Form form, string subtitle = null, Action onRefresh = null, Action openSettingsAction = null)
+        {
+            if (form == null || form.IsDisposed) return null;
+
+            string typeName = form.GetType().Name;
+            if (typeName == "MenuForm" || form is SRSettingsForm)
+            {
+                return null;
+            }
+
+            if (form.FormBorderStyle == FormBorderStyle.FixedDialog ||
+                form.FormBorderStyle == FormBorderStyle.FixedToolWindow ||
+                form.FormBorderStyle == FormBorderStyle.SizableToolWindow ||
+                (!form.MaximizeBox && !form.MinimizeBox && form.Width < 500 && form.Height < 400))
+            {
+                return null;
+            }
+
+            foreach (Control c in form.Controls)
+            {
+                if (c is SRTopNavbar existing)
+                {
+                    existing.ApplyThemeState();
+                    return existing;
+                }
+            }
+
+            var navbar = new SRTopNavbar(form, subtitle, onRefresh, openSettingsAction);
+            form.Controls.Add(navbar);
+            navbar.SendToBack(); // In WinForms docking, SendToBack ensures Top dock at Y=0 above existing controls
+
+            int navHeight = navbar.Height;
+            foreach (Control c in form.Controls)
+            {
+                if (c == navbar || c is StatusStrip) continue;
+
+                // Adjust floating controls anchored to Top
+                if (c.Dock == DockStyle.None && c.Top < navHeight)
+                {
+                    int oldTop = c.Top;
+                    c.Top = navHeight + (oldTop > 0 ? oldTop : 4);
+                    if ((c.Anchor & AnchorStyles.Bottom) == AnchorStyles.Bottom)
+                    {
+                        c.Height = Math.Max(50, c.Height - (c.Top - oldTop));
+                    }
+                }
+            }
+
+            return navbar;
+        }
+
+        public static bool HasTopNavbar(Form form)
+        {
+            if (form == null) return false;
+            foreach (Control c in form.Controls)
+            {
+                if (c is SRTopNavbar) return true;
+            }
+            return false;
+        }
+
         public static void RegisterForm(Form form, ToolStrip navToolStrip = null, Action customUpdate = null)
         {
             if (form == null) return;
@@ -845,12 +906,10 @@ namespace CodeWalker.WinForms
             }
             catch { }
 
-            if (navToolStrip == null)
-            {
-                navToolStrip = FindPrimaryToolStrip(form);
-            }
+            var topNavbar = EnsureTopNavbar(form);
 
-            if (navToolStrip != null)
+            // Backward-compatible toolstrip injection only if top navbar wasn't created and a navToolStrip was supplied
+            if (topNavbar == null && navToolStrip != null)
             {
                 InjectNavbarControls(navToolStrip, form);
             }

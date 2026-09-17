@@ -138,7 +138,7 @@ namespace CodeWalker.Project
 
             try
             {
-                SRThemeManager.RegisterForm(this, this.MainToolbar);
+                SRThemeManager.RegisterForm(this);
             }
             catch { }
 

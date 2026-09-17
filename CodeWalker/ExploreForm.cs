@@ -78,7 +78,7 @@ namespace CodeWalker
 
             try
             {
-                SRThemeManager.RegisterForm(this, this.MainToolbar, () =>
+                SRThemeManager.RegisterForm(this, null, () =>
                 {
                     MainSplitContainer.BackColor = SRThemeManager.Border;
                     MainTreeView.BackColor = SRThemeManager.InputBackground;
