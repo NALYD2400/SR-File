@@ -2366,6 +2366,87 @@ namespace CodeWalker
 
 
 
+        private bool isCursorHidden = false;
+        private bool mouseCaptured = false;
+
+        public void EnsureCursorVisible()
+        {
+            if (isCursorHidden)
+            {
+                Cursor.Show();
+                isCursorHidden = false;
+            }
+        }
+
+        public void EnsureCursorHidden()
+        {
+            if (!isCursorHidden)
+            {
+                Cursor.Hide();
+                isCursorHidden = true;
+            }
+        }
+
+        public void SetMouseCapture(bool capture)
+        {
+            mouseCaptured = capture;
+            if (!mouseCaptured || (ToolsPanel != null && ToolsPanel.Visible))
+            {
+                EnsureCursorVisible();
+            }
+            else if (ControlMode != WorldControlMode.Free)
+            {
+                EnsureCursorHidden();
+            }
+        }
+
+        public void ToggleMouseCapture()
+        {
+            SetMouseCapture(!mouseCaptured);
+        }
+
+        public void EnsureBoundsLoadedAround(Vector3 pos, int range = 3)
+        {
+            if (space?.BoundsStore == null || gameFileCache == null) return;
+            float dist = 50.0f * range;
+            Vector3 min = pos - dist;
+            Vector3 max = pos + dist;
+            var items = space.BoundsStore.GetItems(ref min, ref max, collisionmeshlayers);
+            if (items != null)
+            {
+                for (int i = 0; i < items.Count; i++)
+                {
+                    gameFileCache.GetYbn(items[i].Name);
+                }
+            }
+        }
+
+        public float GetGroundElevation(Vector3 pos, float searchAbove = 35.0f, float searchBelow = 100.0f)
+        {
+            EnsureBoundsLoadedAround(pos, 4);
+
+            Ray downRay = new Ray(pos + new Vector3(0, 0, searchAbove), -Vector3.UnitZ);
+            var hit = space.RayIntersect(downRay, searchAbove + searchBelow, collisionmeshlayers);
+
+            float hmMin = 0, hmMax = 0;
+            bool hasHm = heightmaps != null && heightmaps.GetHeight(pos.X, pos.Y, out hmMin, out hmMax);
+
+            if (hit.Hit)
+            {
+                if (!hasHm || hit.Position.Z >= hmMin - 5.0f)
+                {
+                    return hit.Position.Z;
+                }
+            }
+
+            if (hasHm)
+            {
+                return hmMax;
+            }
+
+            return pos.Z;
+        }
+
         public void SetControlMode(WorldControlMode mode)
         {
             if (InvokeRequired)
@@ -2403,7 +2484,8 @@ namespace CodeWalker
                 camera.TargetDistance = 1.0f; //default?
                 camera.Smoothness = Settings.Default.CameraSmoothing;
 
-                Cursor.Show();
+                SetMouseCapture(false);
+                EnsureCursorVisible();
             }
             else if (!isfree && wasfree)
             {
@@ -2418,9 +2500,7 @@ namespace CodeWalker
                 else
                 {
                     Vector3 testPos = camEntity.Position;
-                    Ray groundRay = new Ray(testPos + new Vector3(0, 0, 30.0f), -Vector3.UnitZ);
-                    var ghit = space.RayIntersect(groundRay, 100.0f, collisionmeshlayers);
-                    float gZ = ghit.Hit ? ghit.Position.Z : (testPos.Z - 1.7f);
+                    float gZ = GetGroundElevation(testPos);
 
                     pedEntity.Position = new Vector3(testPos.X, testPos.Y, gZ + 1.7f);
                     pedEntity.Velocity = Vector3.Zero;
@@ -2448,13 +2528,21 @@ namespace CodeWalker
 
                 Renderer.timerunning = true;
 
-                //center the mouse in the window
-                System.Drawing.Point centerp = new System.Drawing.Point(ClientSize.Width / 2, ClientSize.Height / 2);
-                MouseLastPoint = centerp;
-                MouseX = centerp.X;
-                MouseY = centerp.Y;
-                Cursor.Position = PointToScreen(centerp);
-                Cursor.Hide();
+                if (ToolsPanel != null && ToolsPanel.Visible)
+                {
+                    SetMouseCapture(false);
+                    EnsureCursorVisible();
+                }
+                else
+                {
+                    //center the mouse in the window
+                    System.Drawing.Point centerp = new System.Drawing.Point(ClientSize.Width / 2, ClientSize.Height / 2);
+                    MouseLastPoint = centerp;
+                    MouseX = centerp.X;
+                    MouseY = centerp.Y;
+                    Cursor.Position = PointToScreen(centerp);
+                    SetMouseCapture(true);
+                }
             }
             else if (mode == WorldControlMode.Car && ControlMode == WorldControlMode.Ped)
             {
@@ -2473,9 +2561,7 @@ namespace CodeWalker
                 {
                     Vector3 rgt = new Vector3((float)Math.Cos(vehicleHeading), (float)Math.Sin(vehicleHeading), 0.0f);
                     Vector3 exitPos = activeVehicle.Position - rgt * 2.2f;
-                    Ray groundRay = new Ray(exitPos + new Vector3(0, 0, 10.0f), -Vector3.UnitZ);
-                    var ghit = space.RayIntersect(groundRay, 30.0f, collisionmeshlayers);
-                    float gZ = ghit.Hit ? ghit.Position.Z : (activeVehicle.Position.Z - vehicleGroundOffset.Z);
+                    float gZ = GetGroundElevation(exitPos, 15.0f, 30.0f);
                     pedEntity.Position = new Vector3(exitPos.X, exitPos.Y, gZ + 1.7f);
                     pedEntity.Velocity = Vector3.Zero;
                     pedEntity.OnGround = true;
@@ -2582,19 +2668,41 @@ namespace CodeWalker
             Vector3 nextPos = pedEntity.Position + horizDisp;
             float currentFeetZ = pedEntity.Position.Z - 1.7f;
 
-            // Vertical ground raycast for terrain/floor elevation clamping
-            Vector3 rayTop = new Vector3(nextPos.X, nextPos.Y, Math.Max(nextPos.Z + 2.5f, currentFeetZ + 3.0f));
-            Ray downRay = new Ray(rayTop, -Vector3.UnitZ);
-            var groundHit = space.RayIntersect(downRay, 25.0f, collisionmeshlayers);
+            // Stream collision bounds continuously around pedestrian
+            EnsureBoundsLoadedAround(nextPos, 3);
 
-            if (groundHit.Hit)
+            // Terrain heightmap baseline elevation
+            float hmMin = 0, hmMax = 0;
+            bool hasHm = heightmaps != null && heightmaps.GetHeight(nextPos.X, nextPos.Y, out hmMin, out hmMax);
+
+            // Vertical ground raycast for terrain/floor elevation clamping
+            Vector3 rayTop = new Vector3(nextPos.X, nextPos.Y, Math.Max(nextPos.Z + 3.0f, currentFeetZ + 3.0f));
+            Ray downRay = new Ray(rayTop, -Vector3.UnitZ);
+            var groundHit = space.RayIntersect(downRay, 30.0f, collisionmeshlayers);
+
+            bool haveGround = groundHit.Hit || hasHm;
+            float groundZ = groundHit.Hit ? groundHit.Position.Z : hmMax;
+
+            if (groundHit.Hit && hasHm && groundHit.Position.Z < hmMin - 5.0f)
             {
-                float groundZ = groundHit.Position.Z;
+                // Ray hit an interior or subterranean mesh below terrain heightmap
+                groundZ = hmMax;
+            }
+
+            if (haveGround)
+            {
                 float heightDiff = groundZ - currentFeetZ;
 
-                if (pedEntity.OnGround)
+                // CRITICAL FIX: If feet are below ground surface, ALWAYS snap up immediately!
+                if (currentFeetZ < groundZ - 0.05f)
                 {
-                    // If on ground and slope/step is within walking threshold (up to 0.75m step, down up to 1.2m)
+                    pedEntity.OnGround = true;
+                    pedVerticalVelocity = 0.0f;
+                    nextPos.Z = groundZ + 1.7f;
+                }
+                else if (pedEntity.OnGround)
+                {
+                    // Walking on ground:
                     if (heightDiff <= 0.75f && heightDiff >= -1.2f)
                     {
                         pedEntity.OnGround = true;
@@ -2603,7 +2711,7 @@ namespace CodeWalker
                     }
                     else if (heightDiff < -1.2f)
                     {
-                        // Falling off drop or ledge
+                        // Drop/ledge: fall
                         pedEntity.OnGround = false;
                         pedVerticalVelocity -= 12.0f * elapsed;
                         nextPos.Z += pedVerticalVelocity * elapsed;
@@ -2616,9 +2724,10 @@ namespace CodeWalker
                     }
                     else
                     {
-                        // Barrier or wall too high (> 0.75m): block horizontal movement
+                        // Barrier or wall too high (> 0.75m): block horizontal movement only
                         nextPos.X = pedEntity.Position.X;
                         nextPos.Y = pedEntity.Position.Y;
+                        nextPos.Z = pedEntity.Position.Z; // Maintain current elevation, do not trap underground
                     }
                 }
                 else
@@ -2636,7 +2745,7 @@ namespace CodeWalker
             }
             else
             {
-                // Free fall
+                // Free fall only when no collision mesh AND no heightmap
                 pedEntity.OnGround = false;
                 pedVerticalVelocity -= 12.0f * elapsed;
                 nextPos.Z += pedVerticalVelocity * elapsed;
@@ -2722,7 +2831,7 @@ namespace CodeWalker
                 }
             }
 
-            if (firePressed)
+            if (firePressed && mouseCaptured)
             {
                 ShootActiveWeapon();
             }
@@ -2749,26 +2858,35 @@ namespace CodeWalker
             }
             else if (throttle < -0.05f)
             {
-                vehicleSpeed += throttle * brakeRate * elapsed;
-                if (vehicleSpeed < maxReverse) vehicleSpeed = maxReverse;
+                if (vehicleSpeed > 0.5f)
+                {
+                    vehicleSpeed += throttle * brakeRate * elapsed;
+                }
+                else
+                {
+                    vehicleSpeed += throttle * accelRate * 0.6f * elapsed;
+                    if (vehicleSpeed < maxReverse) vehicleSpeed = maxReverse;
+                }
             }
             else
             {
                 if (vehicleSpeed > 0)
                 {
-                    vehicleSpeed = Math.Max(0.0f, vehicleSpeed - dragRate * elapsed);
+                    vehicleSpeed -= dragRate * elapsed;
+                    if (vehicleSpeed < 0) vehicleSpeed = 0;
                 }
                 else if (vehicleSpeed < 0)
                 {
-                    vehicleSpeed = Math.Min(0.0f, vehicleSpeed + dragRate * elapsed);
+                    vehicleSpeed += dragRate * elapsed;
+                    if (vehicleSpeed > 0) vehicleSpeed = 0;
                 }
             }
 
-            float speedFactor = Math.Min(1.0f, Math.Abs(vehicleSpeed) / 5.0f);
             if (Math.Abs(vehicleSpeed) > 0.1f)
             {
-                float dir = (vehicleSpeed >= 0) ? 1.0f : -1.0f;
-                vehicleHeading -= steer * turnRate * speedFactor * dir * elapsed;
+                float speedFactor = Math.Min(1.0f, Math.Abs(vehicleSpeed) / 12.0f);
+                float steerDir = (vehicleSpeed >= 0) ? -steer : steer;
+                vehicleHeading += steerDir * turnRate * speedFactor * elapsed;
             }
 
             Vector3 fwd = new Vector3(-(float)Math.Sin(vehicleHeading), (float)Math.Cos(vehicleHeading), 0.0f);
@@ -2791,6 +2909,7 @@ namespace CodeWalker
             }
 
             Vector3 nextPos = activeVehicle.Position + fwd * vehicleSpeed * elapsed;
+            EnsureBoundsLoadedAround(nextPos, 4);
 
             Vector3[] wheelOffsets = new Vector3[]
             {
@@ -2818,12 +2937,45 @@ namespace CodeWalker
             }
 
             Vector3 upVec = Vector3.UnitZ;
+            float hmMinV = 0, hmMaxV = 0;
+            bool hasHmVeh = heightmaps != null && heightmaps.GetHeight(nextPos.X, nextPos.Y, out hmMinV, out hmMaxV);
+
             if (hitCount > 0)
             {
                 float targetGroundZ = (sumZ / hitCount) + vehicleGroundOffset.Z;
+                if (hasHmVeh && targetGroundZ < hmMinV - 5.0f + vehicleGroundOffset.Z)
+                {
+                    targetGroundZ = hmMaxV + vehicleGroundOffset.Z;
+                }
                 upVec = Vector3.Normalize(sumNormal / hitCount);
                 vehicleVerticalVelocity = 0.0f;
-                nextPos.Z = nextPos.Z + (targetGroundZ - nextPos.Z) * Math.Min(1.0f, 18.0f * elapsed);
+                if (nextPos.Z < targetGroundZ)
+                {
+                    nextPos.Z = targetGroundZ;
+                }
+                else
+                {
+                    nextPos.Z = nextPos.Z + (targetGroundZ - nextPos.Z) * Math.Min(1.0f, 18.0f * elapsed);
+                }
+            }
+            else if (hasHmVeh)
+            {
+                float targetGroundZ = hmMaxV + vehicleGroundOffset.Z;
+                if (nextPos.Z <= targetGroundZ)
+                {
+                    nextPos.Z = targetGroundZ;
+                    vehicleVerticalVelocity = 0.0f;
+                }
+                else
+                {
+                    vehicleVerticalVelocity -= 9.8f * elapsed;
+                    nextPos.Z += vehicleVerticalVelocity * elapsed;
+                    if (nextPos.Z <= targetGroundZ)
+                    {
+                        nextPos.Z = targetGroundZ;
+                        vehicleVerticalVelocity = 0.0f;
+                    }
+                }
             }
             else
             {
@@ -2925,9 +3077,7 @@ namespace CodeWalker
                 newPed.Init(pedName, gameFileCache);
                 newPed.LoadDefaultComponents(gameFileCache);
                 Vector3 spawnRef = (ControlMode == WorldControlMode.Ped) ? pedEntity.Position : camEntity.Position;
-                Ray groundRay = new Ray(spawnRef + new Vector3(0, 0, 30.0f), -Vector3.UnitZ);
-                var ghit = space.RayIntersect(groundRay, 100.0f, collisionmeshlayers);
-                float groundZ = ghit.Hit ? ghit.Position.Z : (spawnRef.Z - 1.7f);
+                float groundZ = GetGroundElevation(spawnRef);
 
                 pedEntity.Position = new Vector3(spawnRef.X, spawnRef.Y, groundZ + 1.7f);
                 pedEntity.Velocity = Vector3.Zero;
@@ -3016,9 +3166,7 @@ namespace CodeWalker
                 Vector3 fwdxy = Vector3.Normalize(new Vector3(fwd.X, fwd.Y, 0));
                 Vector3 targetXY = enterImmediately ? spawnPos : (spawnPos + fwdxy * 4.0f);
 
-                Ray groundRay = new Ray(targetXY + new Vector3(0, 0, 30.0f), -Vector3.UnitZ);
-                var ghit = space.RayIntersect(groundRay, 100.0f, collisionmeshlayers);
-                float groundZ = ghit.Hit ? ghit.Position.Z : targetXY.Z;
+                float groundZ = GetGroundElevation(targetXY);
 
                 newVeh.Position = new Vector3(targetXY.X, targetXY.Y, groundZ + vehicleGroundOffset.Z);
                 vehicleHeading = (float)Math.Atan2(fwdxy.Y, fwdxy.X) - (float)(Math.PI / 2.0);
@@ -6986,6 +7134,20 @@ namespace CodeWalker
             }
             else
             {
+                if (!mouseCaptured)
+                {
+                    if (ToolsPanel == null || !ToolsPanel.Visible)
+                    {
+                        System.Drawing.Point centerp = new System.Drawing.Point(ClientSize.Width / 2, ClientSize.Height / 2);
+                        MouseLastPoint = centerp;
+                        MouseX = centerp.X;
+                        MouseY = centerp.Y;
+                        Cursor.Position = PointToScreen(centerp);
+                        SetMouseCapture(true);
+                        return;
+                    }
+                }
+
                 lock (MouseControlSyncRoot)
                 {
                     MouseControlButtons |= e.Button;
@@ -7101,7 +7263,7 @@ namespace CodeWalker
                     }
                 }
             }
-            else
+            else if (mouseCaptured)
             {
                 lock (MouseControlSyncRoot)
                 {
@@ -7115,6 +7277,11 @@ namespace CodeWalker
                     Cursor.Position = newpos;
                     return;
                 }
+            }
+            else
+            {
+                UpdateMousePosition(e);
+                EnsureCursorVisible();
             }
 
 
@@ -7344,6 +7511,13 @@ namespace CodeWalker
                 return;
             }
 
+            if (k == Keys.F8)
+            {
+                SetControlMode((ControlMode == WorldControlMode.Free) ? WorldControlMode.Ped : WorldControlMode.Free);
+                e.Handled = true;
+                return;
+            }
+
             if (k == Keys.F7 || (!ctrl && !shift && !e.Alt && k == Keys.T && !(ActiveControl is TextBox)))
             {
                 ToggleToolsPanel();
@@ -7351,9 +7525,34 @@ namespace CodeWalker
                 return;
             }
 
-            if (k == Keys.Escape) //temporary? panic get cursor back when in first person mode
+            if ((k == Keys.Menu || k == Keys.Alt) && ControlMode != WorldControlMode.Free)
             {
-                if (ControlMode != WorldControlMode.Free) SetControlMode(WorldControlMode.Free);
+                ToggleMouseCapture();
+                e.Handled = true;
+                return;
+            }
+
+            if (k == Keys.Escape)
+            {
+                if (ToolsPanel != null && ToolsPanel.Visible)
+                {
+                    ToggleToolsPanel();
+                    e.Handled = true;
+                    return;
+                }
+                else if (ControlMode != WorldControlMode.Free)
+                {
+                    if (mouseCaptured)
+                    {
+                        SetMouseCapture(false);
+                    }
+                    else
+                    {
+                        SetControlMode(WorldControlMode.Free);
+                    }
+                    e.Handled = true;
+                    return;
+                }
             }
 
             if (ControlMode != WorldControlMode.Free || ControlBrushEnabled)
@@ -7456,6 +7655,10 @@ namespace CodeWalker
                 ToolsPanelShowButton.BringToFront();
                 ToolsPanelShowButton.Focus();
             }
+            if (ControlMode != WorldControlMode.Free)
+            {
+                SetMouseCapture(true);
+            }
         }
 
         private void ToolsPanelShowButton_Click(object sender, EventArgs e)
@@ -7466,6 +7669,8 @@ namespace CodeWalker
             if (webViewTools != null) webViewTools.BringToFront();
             UpdateToolsNavbarButtonState();
             ToolsPanelHideButton.Focus();
+            SetMouseCapture(false);
+            EnsureCursorVisible();
         }
 
         private void WireframeCheckBox_CheckedChanged(object sender, EventArgs e)
@@ -8879,10 +9084,16 @@ namespace CodeWalker
                 ToolsPanel.Visible = true;
                 ToolsPanel.BringToFront();
                 if (webViewTools != null) webViewTools.BringToFront();
+                SetMouseCapture(false);
+                EnsureCursorVisible();
             }
             else
             {
                 ToolsPanel.Visible = false;
+                if (ControlMode != WorldControlMode.Free)
+                {
+                    SetMouseCapture(true);
+                }
             }
             UpdateToolsNavbarButtonState();
         }
@@ -9033,6 +9244,10 @@ namespace CodeWalker
                             ToolsPanelShowButton.BringToFront();
                             ToolsPanelShowButton.Focus();
                         }
+                        if (ControlMode != WorldControlMode.Free)
+                        {
+                            SetMouseCapture(true);
+                        }
                     }));
                 }
                 else if (json.Contains("\"open_devtools\""))
@@ -9060,6 +9275,8 @@ namespace CodeWalker
                         if (webViewTools != null) webViewTools.BringToFront();
                         UpdateToolsNavbarButtonState();
                         SendInitToWebTools();
+                        SetMouseCapture(false);
+                        EnsureCursorVisible();
                     }));
                 }
                 else if (json.Contains("\"set_lod_dist\""))

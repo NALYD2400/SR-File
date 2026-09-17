@@ -1,4 +1,4 @@
-﻿using CodeWalker.GameFiles;
+using CodeWalker.GameFiles;
 using SharpDX;
 using System;
 using System.Collections.Generic;
@@ -29,6 +29,74 @@ namespace CodeWalker.World
 
         public Vector4[] NodePositions;
         public EditorVertex[] TriangleVerts;
+
+        public bool GetHeight(float x, float y, out float minZ, out float maxZ)
+        {
+            minZ = 0.0f;
+            maxZ = 0.0f;
+            if (!Inited || HeightmapFiles == null || HeightmapFiles.Count == 0) return false;
+
+            for (int i = 0; i < HeightmapFiles.Count; i++)
+            {
+                var hmf = HeightmapFiles[i];
+                if (hmf == null || hmf.MaxHeights == null) continue;
+
+                var min = hmf.BBMin;
+                var max = hmf.BBMax;
+                if (x < min.X || x > max.X || y < min.Y || y > max.Y) continue;
+
+                var w = hmf.Width;
+                var h = hmf.Height;
+                if (w < 2 || h < 2) continue;
+
+                var siz = max - min;
+                float normX = (x - min.X) / siz.X;
+                float normY = (y - min.Y) / siz.Y;
+                float fx = normX * (w - 1);
+                float fy = normY * (h - 1);
+
+                int x0 = (int)Math.Floor(fx);
+                int y0 = (int)Math.Floor(fy);
+                int x1 = Math.Min(x0 + 1, w - 1);
+                int y1 = Math.Min(y0 + 1, h - 1);
+                x0 = Math.Max(0, Math.Min(x0, w - 1));
+                y0 = Math.Max(0, Math.Min(y0, h - 1));
+
+                float tx = fx - x0;
+                float ty = fy - y0;
+                float stepZ = siz.Z / 255.0f;
+
+                var hmax = hmf.MaxHeights;
+                var hmin = hmf.MinHeights;
+
+                float max00 = min.Z + stepZ * hmax[y0 * w + x0];
+                float max10 = min.Z + stepZ * hmax[y0 * w + x1];
+                float max01 = min.Z + stepZ * hmax[y1 * w + x0];
+                float max11 = min.Z + stepZ * hmax[y1 * w + x1];
+                float top0 = max00 * (1.0f - tx) + max10 * tx;
+                float top1 = max01 * (1.0f - tx) + max11 * tx;
+                maxZ = top0 * (1.0f - ty) + top1 * ty;
+
+                if (hmin != null && hmin.Length == hmax.Length)
+                {
+                    float min00 = min.Z + stepZ * hmin[y0 * w + x0];
+                    float min10 = min.Z + stepZ * hmin[y0 * w + x1];
+                    float min01 = min.Z + stepZ * hmin[y1 * w + x0];
+                    float min11 = min.Z + stepZ * hmin[y1 * w + x1];
+                    float bot0 = min00 * (1.0f - tx) + min10 * tx;
+                    float bot1 = min01 * (1.0f - tx) + min11 * tx;
+                    minZ = bot0 * (1.0f - ty) + bot1 * ty;
+                }
+                else
+                {
+                    minZ = maxZ;
+                }
+
+                return true;
+            }
+
+            return false;
+        }
 
 
         public void Init(GameFileCache gameFileCache, Action<string> updateStatus)
