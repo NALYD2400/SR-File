@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SR File - Outils 3D</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>">
   <style>
     :root {
       --bg: #0A0E16;
@@ -936,6 +937,8 @@
           console.error(err);
         }
       });
+    }
+
     // Drag-to-resize panel
     const resizeHandle = document.getElementById('resize-handle');
     let isResizing = false;
@@ -968,8 +971,16 @@
       });
     }
 
-    send('ui_ready');
-  }
+    function notifyReady() {
+      send('ui_ready');
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', notifyReady);
+    } else {
+      notifyReady();
+    }
+    setTimeout(notifyReady, 300);
 </script>
 </body>
 </html>

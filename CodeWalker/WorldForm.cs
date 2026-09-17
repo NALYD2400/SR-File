@@ -8259,6 +8259,12 @@ namespace CodeWalker
             ToolsPanel.SetBounds(left, topOffset, width, height);
             ToolsPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Right;
 
+            if (ToolsPanel.Visible)
+            {
+                ToolsPanel.BringToFront();
+                if (webViewTools != null) webViewTools.BringToFront();
+            }
+
             if (ToolsPanelShowButton != null)
             {
                 ToolsPanelShowButton.Top = topOffset + 6;
